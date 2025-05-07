@@ -34,7 +34,7 @@ function Contact() {
 
     try {
       const response = await axios.post(
-        `${process.env.REACT_APP_API_URL}/api/contact-us`,
+        `${import.meta.env.VITE_API_URL}/api/contact-us`,
         form,
         {
           headers: {

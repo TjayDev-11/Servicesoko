@@ -26,7 +26,7 @@ function Messages() {
     setError(null);
     try {
       const response = await axios.get(
-        `${process.env.REACT_APP_API_URL}/api/conversations`,
+        `${import.meta.env.VITE_API_URL}/api/conversations`,
         {
           headers: { Authorization: `Bearer ${token}` },
         }
@@ -45,7 +45,7 @@ function Messages() {
     setError(null);
     try {
       const response = await axios.get(
-        `${process.env.REACT_APP_API_URL}/api/messages/${receiverId}`,
+        `${import.meta.env.VITE_API_URL}/api/messages/${receiverId}`,
         {
           headers: { Authorization: `Bearer ${token}` },
         }
@@ -92,7 +92,7 @@ function Messages() {
       setMessages((prev) => [...prev, messageToSend]);
       setNewMessage("");
       const response = await axios.post(
-        `${process.env.REACT_APP_API_URL}/api/messages`,
+        `${import.meta.env.VITE_API_URL}/api/messages`,
         { receiverId: selectedUserId, content: newMessage },
         { headers: { Authorization: `Bearer ${token}` } }
       );
