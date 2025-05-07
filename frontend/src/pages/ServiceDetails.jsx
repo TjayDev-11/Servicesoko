@@ -206,7 +206,7 @@ function ServiceDetails() {
       console.log("Final booking data:", bookingData);
 
       const response = await axios.post(
-        "http://localhost:5000/api/orders",
+        "${process.env.REACT_APP_API_URL}/api/orders",
         bookingData,
         { headers: { Authorization: `Bearer ${token}` } }
       );
@@ -268,7 +268,7 @@ function ServiceDetails() {
       setChatSellerId(sellerId);
       try {
         const response = await axios.get(
-          `http://localhost:5000/api/messages/${sellerId}`,
+          `${process.env.REACT_APP_API_URL}/api/messages/${sellerId}`,
           {
             headers: { Authorization: `Bearer ${token}` },
           }
@@ -285,7 +285,7 @@ function ServiceDetails() {
     if (!newMessage.trim() || !chatSellerId) return;
     try {
       const response = await axios.post(
-        "http://localhost:5000/api/messages",
+        "${process.env.REACT_APP_API_URL}/api/messages",
         { receiverId: chatSellerId, content: newMessage.trim() },
         { headers: { Authorization: `Bearer ${token}` } }
       );

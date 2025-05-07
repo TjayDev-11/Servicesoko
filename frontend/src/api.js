@@ -2,9 +2,8 @@
 import axios from "axios";
 
 const api = axios.create({
-  baseURL: "http://localhost:5000", // No /api prefix yet
+  baseURL: process.env.REACT_APP_API_URL, // No /api prefix yet
 });
-
 // Automatic Authorization header
 api.interceptors.request.use((config) => {
   const token = localStorage.getItem("authToken"); // Always authToken

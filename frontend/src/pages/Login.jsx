@@ -38,7 +38,7 @@ function Login() {
     setSuccess("");
 
     try {
-      const res = await fetch("http://localhost:5000/auth/login", {
+      const res = await fetch(`${process.env.REACT_APP_API_URL}/auth/login`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -117,7 +117,7 @@ function Login() {
     setLoading(true);
     setError("");
     setSuccess("");
-    window.location.href = "http://localhost:5000/auth/google";
+    window.location.href = `${process.env.REACT_APP_API_URL}/auth/google`;
   };
 
   return (

@@ -52,7 +52,7 @@ function Navbar() {
 
       try {
         const response = await axios.get(
-          "http://localhost:5000/api/conversations",
+          `${process.env.REACT_APP_API_URL}/api/conversations`,
           {
             headers: { Authorization: `Bearer ${token}` },
           }

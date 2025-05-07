@@ -55,7 +55,7 @@ function Profile() {
       }
 
       const response = await axios.put(
-        "http://localhost:5000/api/profile",
+        "${process.env.REACT_APP_API_URL}/api/profile",
         formData,
         {
           headers: {
