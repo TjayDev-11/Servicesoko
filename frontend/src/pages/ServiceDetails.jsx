@@ -206,7 +206,7 @@ function ServiceDetails() {
       console.log("Final booking data:", bookingData);
 
       const response = await axios.post(
-        "${import.meta.env.VITE_API_URL}/api/orders",
+        `${import.meta.env.VITE_API_URL}/api/orders`,
         bookingData,
         { headers: { Authorization: `Bearer ${token}` } }
       );
@@ -285,7 +285,7 @@ function ServiceDetails() {
     if (!newMessage.trim() || !chatSellerId) return;
     try {
       const response = await axios.post(
-        "${import.meta.env.VITE_API_URL}/api/messages",
+        `${import.meta.env.VITE_API_URL}/api/messages`,
         { receiverId: chatSellerId, content: newMessage.trim() },
         { headers: { Authorization: `Bearer ${token}` } }
       );

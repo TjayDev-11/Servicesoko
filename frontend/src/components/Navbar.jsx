@@ -11,6 +11,7 @@ import {
   FaSignOutAlt,
   FaBars,
   FaTimes,
+  FaChevronDown,
 } from "react-icons/fa";
 
 // Utility to debounce API calls
@@ -23,7 +24,7 @@ const debounce = (func, wait) => {
 };
 
 function Navbar() {
-  const { token, isTokenValid, clear, user, fetchOrders, newOrdersCount } =
+  const { token, isAuthenticated, clear, user, fetchOrders, sellerOrders } =
     useStore();
   const navigate = useNavigate();
   const location = useLocation();
@@ -40,13 +41,20 @@ function Navbar() {
     ordersFetched: false,
   });
 
+  // Compute newOrdersCount from sellerOrders
+  const newOrdersCount = sellerOrders?.newOrders?.length || 0;
+
   // Debounced fetchUnreadCount
   const fetchUnreadCount = useCallback(
     debounce(async (force = false) => {
       const now = Date.now();
-      // Skip if recently fetched (within 30 seconds) unless forced
       if (!force && now - dataCache.current.lastFetchedUnread < 30000) {
         setUnreadCount(dataCache.current.unreadCount);
+        return;
+      }
+
+      if (!isAuthenticated || !token) {
+        setUnreadCount(0);
         return;
       }
 
@@ -65,21 +73,15 @@ function Navbar() {
         dataCache.current.lastFetchedUnread = now;
         setUnreadCount(totalUnread);
       } catch (error) {
-        console.error("Failed to fetch unread count:", {
-          message: error.message,
-          status: error.response?.status,
-          data: error.response?.data,
-        });
         setUnreadCount(dataCache.current.unreadCount || 0);
       }
     }, 300),
-    [token]
+    [token, isAuthenticated]
   );
 
   // Preload data on mount
   useEffect(() => {
-    if (token && isTokenValid(token)) {
-      // Fetch unread count and orders only if not already fetched
+    if (isAuthenticated && token) {
       if (!dataCache.current.lastFetchedUnread) {
         fetchUnreadCount();
       }
@@ -87,8 +89,11 @@ function Navbar() {
         fetchOrders(token);
         dataCache.current.ordersFetched = true;
       }
+    } else {
+      setUnreadCount(0);
+      dataCache.current.ordersFetched = false;
     }
-  }, [token, fetchUnreadCount, fetchOrders]);
+  }, [isAuthenticated, token, fetchUnreadCount, fetchOrders]);
 
   // Handle click outside to close dropdown
   useEffect(() => {
@@ -120,10 +125,8 @@ function Navbar() {
     }
   }, []);
 
-  // Open dropdown without fetching data
   const handleDropdownOpen = useCallback(() => {
     setIsDropdownOpen(true);
-    // Use cached data instead of fetching
     setUnreadCount(dataCache.current.unreadCount);
   }, []);
 
@@ -136,35 +139,26 @@ function Navbar() {
     setIsMobileMenuOpen((prev) => !prev);
   }, []);
 
-  const isAuthenticated = token && isTokenValid(token);
-
   return (
     <>
       <style>
         {`
-          @keyframes pulse {
-            0% { transform: scale(1); }
-            50% { transform: scale(1.1); }
-            100% { transform: scale(1); }
-          }
           .nav-link {
             color: rgba(255, 255, 255, 0.9);
             text-decoration: none;
-            padding: 8px 16px;
-            transition: all 0.3s ease;
+            padding: 8px 12px;
+            transition: all 0.2s ease;
             font-weight: 500;
-            letter-spacing: 0.5px;
+            font-size: 15px;
             border-radius: 4px;
-            margin: 0 4px;
           }
           .nav-link:hover {
             color: white;
-            background-color: rgba(79, 195, 247, 0.2);
+            background-color: rgba(255, 255, 255, 0.1);
           }
           .active-nav-link {
             color: white;
-            background-color: rgba(79, 195, 247, 0.2);
-            border-bottom: 2px solid #4fc3f7;
+            font-weight: 600;
           }
           .logo-container {
             display: flex;
@@ -172,16 +166,12 @@ function Navbar() {
             gap: 10px;
           }
           .logo-img {
-            height: 40px;
+            height: 36px;
             width: auto;
-            transition: transform 0.3s ease;
-          }
-          .logo-img:hover {
-            transform: scale(1.05);
           }
           .desktop-nav {
             display: flex;
-            gap: 8px;
+            gap: 4px;
             align-items: center;
           }
           .mobile-nav {
@@ -191,9 +181,7 @@ function Navbar() {
             top: 100%;
             left: 0;
             right: 0;
-            background-color: rgba(26, 35, 126, 0.95);
-            backdrop-filter: blur(10px);
-            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            background-color: rgba(26, 35, 126, 0.98);
             padding: 16px;
             z-index: 999;
           }
@@ -203,17 +191,15 @@ function Navbar() {
             padding: 12px 16px;
             font-size: 16px;
             font-weight: 500;
-            transition: all 0.3s ease;
-            border-radius: 4px;
+            transition: all 0.2s ease;
           }
           .mobile-nav-link:hover {
             color: white;
-            background-color: rgba(79, 195, 247, 0.2);
+            background-color: rgba(255, 255, 255, 0.1);
           }
           .mobile-active-nav-link {
             color: white;
-            background-color: rgba(79, 195, 247, 0.2);
-            border-left: 3px solid #4fc3f7;
+            font-weight: 600;
           }
           .hamburger {
             display: none;
@@ -223,6 +209,43 @@ function Navbar() {
             font-size: 24px;
             cursor: pointer;
             padding: 8px;
+          }
+          .login-btn {
+            background: transparent;
+            color: white;
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            padding: 8px 16px;
+            border-radius: 4px;
+            font-weight: 500;
+            transition: all 0.2s ease;
+          }
+          .login-btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+            border-color: rgba(255, 255, 255, 0.5);
+          }
+          .user-btn {
+            background: transparent;
+            border: none;
+            color: white;
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 8px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+          }
+          .user-btn:hover {
+            background: rgba(255, 255, 255, 0.1);
+          }
+          .notification-badge {
+            background-color: #4fc3f7;
+            color: #0d47a1;
+            border-radius: 10px;
+            padding: 2px 6px;
+            font-size: 11px;
+            font-weight: 600;
+            margin-left: 4px;
           }
           @media (max-width: 768px) {
             .desktop-nav {
@@ -237,42 +260,22 @@ function Navbar() {
             .logo-img {
               height: 32px;
             }
-            .logo-container span {
-              font-size: 20px;
-            }
-            .dropdown-container {
-              margin-left: 8px;
-            }
             .dropdown-menu {
-              min-width: 100%;
-              width: calc(100vw - 32px);
-              right: 16px;
-              left: 16px;
-              transform: translateX(0);
-            }
-          }
-          @media (max-width: 480px) {
-            nav {
-              padding: 12px 16px;
-            }
-            .logo-container span {
-              font-size: 18px;
+              width: 100%;
+              right: 0;
+              left: 0;
             }
           }
         `}
       </style>
       <nav
         style={{
-          backgroundColor: "rgba(26, 35, 126, 0.95)",
-          backdropFilter: "blur(10px)",
-          WebkitBackdropFilter: "blur(10px)",
+          backgroundColor: "rgba(26, 35, 126, 0.98)",
           padding: "16px 24px",
-          border: "none",
           position: "sticky",
           top: 0,
           zIndex: 1000,
           borderBottom: "1px solid rgba(255, 255, 255, 0.1)",
-          boxShadow: "0 4px 6px rgba(0,0,0,0.1)",
         }}
       >
         <div
@@ -287,9 +290,7 @@ function Navbar() {
           <Link
             to="/"
             className="logo-container"
-            style={{
-              textDecoration: "none",
-            }}
+            style={{ textDecoration: "none" }}
           >
             <img
               src="/images/logo.png"
@@ -299,9 +300,8 @@ function Navbar() {
             <span
               style={{
                 color: "white",
-                fontSize: "24px",
-                fontWeight: "bold",
-                letterSpacing: "1px",
+                fontSize: "22px",
+                fontWeight: "600",
                 fontFamily: "'Inter', sans-serif",
               }}
             >
@@ -309,7 +309,7 @@ function Navbar() {
             </span>
           </Link>
 
-          <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
             <div className="desktop-nav">
               <Link
                 to="/"
@@ -344,19 +344,7 @@ function Navbar() {
                 Contact
               </Link>
               {!isAuthenticated && (
-                <Link
-                  to="/login"
-                  className={`nav-link ${
-                    location.pathname === "/login" ? "active-nav-link" : ""
-                  }`}
-                  style={{
-                    background: "#4fc3f7",
-                    color: "#0d47a1",
-                    padding: "8px 20px",
-                    borderRadius: "50px",
-                    fontWeight: "600",
-                  }}
-                >
+                <Link to="/login" className="login-btn">
                   Log in
                 </Link>
               )}
@@ -373,42 +361,14 @@ function Navbar() {
             {isAuthenticated && (
               <div className="dropdown-container" ref={dropdownRef}>
                 <button
+                  className="user-btn"
                   onClick={handleDropdownOpen}
-                  style={{
-                    background: "rgba(79, 195, 247, 0.2)",
-                    border: "none",
-                    color: "white",
-                    fontSize: "16px",
-                    cursor: "pointer",
-                    padding: "10px 14px",
-                    borderRadius: "50%",
-                    transition: "all 0.3s ease",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                  }}
                   aria-label="User menu"
                 >
-                  <FaUser style={{ fontSize: "18px" }} />
+                  <FaUser />
+                  <FaChevronDown size={12} />
                   {(unreadCount > 0 || newOrdersCount > 0) && (
-                    <span
-                      style={{
-                        position: "absolute",
-                        top: "-5px",
-                        right: "-5px",
-                        backgroundColor: "#4fc3f7",
-                        color: "#0d47a1",
-                        borderRadius: "50%",
-                        width: "20px",
-                        height: "20px",
-                        fontSize: "12px",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        boxShadow: "0 2px 4px rgba(0,0,0,0.2)",
-                        fontWeight: "bold",
-                      }}
-                    >
+                    <span className="notification-badge">
                       {unreadCount + newOrdersCount}
                     </span>
                   )}
@@ -420,12 +380,10 @@ function Navbar() {
                       position: "absolute",
                       top: "calc(100% + 8px)",
                       right: 0,
-                      backgroundColor: "rgba(26, 35, 126, 0.95)",
-                      backdropFilter: "blur(10px)",
-                      WebkitBackdropFilter: "blur(10px)",
+                      backgroundColor: "rgba(26, 35, 126, 0.98)",
                       borderRadius: "8px",
-                      boxShadow: "0 4px 12px rgba(0,0,0,0.3)",
-                      minWidth: "250px",
+                      boxShadow: "0 4px 12px rgba(0,0,0,0.2)",
+                      minWidth: "220px",
                       zIndex: 1000,
                       border: "1px solid rgba(255, 255, 255, 0.1)",
                     }}
@@ -456,7 +414,7 @@ function Navbar() {
                       style={dropdownLinkStyle()}
                       onClick={() => {
                         setIsDropdownOpen(false);
-                        fetchUnreadCount(true); // Force refresh only when navigating to messages
+                        fetchUnreadCount(true);
                       }}
                     >
                       <FaEnvelope
@@ -477,18 +435,7 @@ function Navbar() {
                       />
                       Orders
                       {newOrdersCount > 0 && (
-                        <span
-                          style={{
-                            marginLeft: "8px",
-                            backgroundColor: "#4fc3f7",
-                            color: "#0d47a1",
-                            borderRadius: "12px",
-                            padding: "2px 8px",
-                            fontSize: "12px",
-                            fontWeight: "bold",
-                            animation: "pulse 1.5s infinite",
-                          }}
-                        >
+                        <span style={badgeStyle("#4fc3f7")}>
                           {newOrdersCount} New
                         </span>
                       )}
@@ -502,24 +449,21 @@ function Navbar() {
                       <button
                         onClick={handleLogout}
                         style={{
-                          display: "block",
+                          display: "flex",
+                          alignItems: "center",
                           width: "100%",
                           padding: "10px 16px",
                           background: "none",
                           border: "none",
-                          color: "#ff5252",
+                          color: "rgba(255, 255, 255, 0.8)",
                           fontWeight: "500",
-                          textAlign: "left",
                           cursor: "pointer",
                           borderRadius: "4px",
-                          transition: "background-color 0.3s ease",
+                          transition: "all 0.2s ease",
                         }}
-                        onMouseOver={(e) =>
-                          (e.target.style.backgroundColor =
-                            "rgba(255, 82, 82, 0.1)")
-                        }
+                        onMouseOver={(e) => (e.target.style.color = "white")}
                         onMouseOut={(e) =>
-                          (e.target.style.backgroundColor = "transparent")
+                          (e.target.style.color = "rgba(255, 255, 255, 0.8)")
                         }
                       >
                         <FaSignOutAlt style={{ marginRight: "10px" }} />
@@ -572,18 +516,9 @@ function Navbar() {
           {!isAuthenticated && (
             <Link
               to="/login"
-              className={`mobile-nav-link ${
-                location.pathname === "/login" ? "mobile-active-nav-link" : ""
-              }`}
+              className="login-btn"
+              style={{ marginTop: "8px", textAlign: "center" }}
               onClick={() => setIsMobileMenuOpen(false)}
-              style={{
-                background: "#4fc3f7",
-                color: "#0d47a1",
-                padding: "12px 16px",
-                borderRadius: "8px",
-                fontWeight: "600",
-                textAlign: "center",
-              }}
             >
               Log in
             </Link>
@@ -603,21 +538,17 @@ const dropdownLinkStyle = () => ({
   fontWeight: "500",
   transition: "all 0.2s ease",
   borderBottom: "1px solid rgba(255, 255, 255, 0.05)",
+  fontSize: "14px",
 });
 
 const badgeStyle = (bgColor) => ({
   marginLeft: "auto",
   backgroundColor: bgColor,
   color: "#0d47a1",
-  borderRadius: "50%",
-  minWidth: "20px",
-  height: "20px",
-  fontSize: "12px",
-  display: "inline-flex",
-  alignItems: "center",
-  justifyContent: "center",
-  padding: "0 4px",
-  fontWeight: "bold",
+  borderRadius: "10px",
+  padding: "2px 6px",
+  fontSize: "11px",
+  fontWeight: "600",
 });
 
 export default Navbar;

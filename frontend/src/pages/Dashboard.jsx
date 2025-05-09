@@ -1,7 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate, Link } from "react-router-dom";
-import useStore, { validateToken } from "../store";
-import api from "../api";
+import useStore from "../store";
 import {
   FaSearch,
   FaChevronRight,
@@ -11,17 +10,10 @@ import {
   FaHistory,
   FaUserTie,
   FaTools,
+  FaRegCheckCircle,
+  FaRegTimesCircle,
 } from "react-icons/fa";
 import ChatModal from "../components/ChatModal";
-
-// Utility to debounce API calls
-const debounce = (func, wait) => {
-  let timeout;
-  return (...args) => {
-    clearTimeout(timeout);
-    timeout = setTimeout(() => func(...args), wait);
-  };
-};
 
 function Dashboard() {
   const {
@@ -32,13 +24,13 @@ function Dashboard() {
     sellerOrders,
     user,
     isLoading,
-    error: storeError,
     setLoading,
     setToken,
     refreshUser,
     fetchServices,
     fetchUserServices,
     fetchOrders,
+    validateToken,
     fetchSellerOrders,
     fetchConversations,
     clear,
@@ -68,97 +60,91 @@ function Dashboard() {
 
   const navigate = useNavigate();
 
-  // Cache for token validation
-  const tokenCache = useMemo(() => ({ valid: null, lastChecked: 0 }), []);
+  const loadData = useCallback(async () => {
+    console.log(
+      "loadData called, token:",
+      token ? token.substring(0, 10) + "..." : "null"
+    );
+    if (!token) {
+      console.log("No token, clearing state and navigating to login");
+      clear();
+      navigate("/login", { replace: true });
+      return;
+    }
 
-  // Optimized loadData with debouncing and caching
-  const loadData = useCallback(
-    debounce(async () => {
-      if (!token) {
+    setLoading(true);
+    setLocalLoading(true);
+
+    try {
+      console.log("Validating token");
+      const user = await validateToken(token);
+      if (!user) {
+        console.log("Token invalid, clearing state and navigating to login");
+        setSnack({
+          show: true,
+          message: "Invalid session. Please log in again.",
+          type: "error",
+        });
         clear();
         navigate("/login", { replace: true });
         return;
       }
 
-      setLoading(true);
-      setLocalLoading(true);
+      console.log("Refreshing user data");
+      await refreshUser(token);
+      const currentUser = useStore.getState().user;
+      const role = currentUser?.role?.toLowerCase();
+      console.log("Current user role:", role);
 
-      try {
-        // Check cached token validity
-        const now = Date.now();
-        if (
-          tokenCache.valid &&
-          now - tokenCache.lastChecked < 30000 // 30 seconds cache
-        ) {
-          if (!tokenCache.valid) {
-            setSnack({
-              show: true,
-              message: "Invalid session. Please log in again.",
-              type: "error",
-            });
-            clear();
-            navigate("/login", { replace: true });
-            return;
-          }
-        } else {
-          const user = await validateToken(token);
-          tokenCache.valid = !!user;
-          tokenCache.lastChecked = now;
-          if (!user) {
-            setSnack({
-              show: true,
-              message: "Invalid session. Please log in again.",
-              type: "error",
-            });
-            clear();
-            navigate("/login", { replace: true });
-            return;
-          }
-        }
-
-        await refreshUser(token);
-        const currentUser = useStore.getState().user;
-        const role = currentUser?.role?.evolvesLowerCase();
-
-        // Batch API calls
-        const loaders = [fetchServices(token)]; // Always fetch services
-        if (role === "buyer" || role === "both") {
-          loaders.push(fetchOrders(token));
-        }
-        if (role === "seller" || role === "both") {
-          loaders.push(fetchUserServices(token), fetchSellerOrders(token));
-          // Lazy-load conversations to reduce initial load time
-          setTimeout(() => fetchConversations(token), 1000);
-        }
-
-        await Promise.all(loaders);
-      } catch (error) {
-        setSnack({
-          show: true,
-          message:
-            error.response?.data?.error || "Failed to load dashboard data",
-          type: "error",
-        });
-      } finally {
-        setLoading(false);
-        setLocalLoading(false);
+      const loaders = [fetchServices(token)];
+      if (role === "buyer" || role === "both") {
+        loaders.push(fetchOrders(token));
       }
-    }, 300),
-    [
-      token,
-      navigate,
-      clear,
-      refreshUser,
-      setLoading,
-      fetchServices,
-      fetchUserServices,
-      fetchOrders,
-      fetchSellerOrders,
-      fetchConversations,
-    ]
-  );
+      if (role === "seller" || role === "both") {
+        loaders.push(fetchUserServices(token), fetchSellerOrders(token));
+        setTimeout(async () => {
+          try {
+            console.log("Fetching conversations");
+            await fetchConversations(token);
+          } catch (error) {
+            console.error("Fetch conversations error:", error);
+            setSnack({
+              show: true,
+              message: "Failed to load conversations",
+              type: "error",
+            });
+          }
+        }, 1000);
+      }
+
+      console.log("Executing loaders:", loaders.length);
+      await Promise.all(loaders);
+      console.log("loadData completed successfully");
+    } catch (error) {
+      console.error("Load data error:", error);
+      setSnack({
+        show: true,
+        message: "Failed to load data. Please try again.",
+        type: "error",
+      });
+    } finally {
+      setLoading(false);
+      setLocalLoading(false);
+    }
+  }, [
+    token,
+    navigate,
+    clear,
+    refreshUser,
+    fetchServices,
+    fetchUserServices,
+    fetchOrders,
+    fetchSellerOrders,
+    fetchConversations,
+  ]);
 
   useEffect(() => {
+    console.log("Dashboard useEffect triggered");
     loadData();
   }, [loadData]);
 
@@ -167,9 +153,7 @@ function Dashboard() {
       setLocalLoading(true);
       const formData = new FormData();
       Object.entries(sellerForm).forEach(([key, value]) => {
-        if (value !== null && value !== undefined) {
-          formData.append(key, value);
-        }
+        if (value) formData.append(key, value);
       });
 
       const response = await api.post("/api/become-seller", formData);
@@ -192,6 +176,7 @@ function Dashboard() {
       setShowForm(false);
       navigate("/add-service");
     } catch (error) {
+      console.error("Become seller error:", error);
       setSnack({
         show: true,
         message: error.response?.data?.error || "Failed to become a seller",
@@ -206,8 +191,7 @@ function Dashboard() {
     async (orderId, status) => {
       try {
         setLocalLoading(true);
-        await api.put(`/api/orders/${orderId}/${status.toLowerCase()}`);
-        useStore.getState().updateOrderStatus(orderId, status);
+        await useStore.getState().updateOrderStatusApi(orderId, status);
         setSnack({
           show: true,
           message: "Order updated successfully!",
@@ -215,9 +199,12 @@ function Dashboard() {
         });
         await fetchSellerOrders(token);
       } catch (error) {
+        console.error("Order update error:", error);
         setSnack({
           show: true,
-          message: error.response?.data?.error || "Failed to update order",
+          message:
+            error.response?.data?.error ||
+            `Failed to update order to ${status.toLowerCase()}`,
           type: "error",
         });
       } finally {
@@ -240,117 +227,111 @@ function Dashboard() {
     setShowChat(true);
   }, []);
 
-  // Navigate to orders page programmatically
   const handleViewAllOrders = useCallback(() => {
-    try {
-      navigate("/orders");
-    } catch (error) {
-      setSnack({
-        show: true,
-        message: "Failed to load orders page. Please try again.",
-        type: "error",
-      });
-    }
+    navigate("/orders");
   }, [navigate]);
 
   const styles = {
     container: {
       minHeight: "100vh",
       backgroundColor: "#f8f9fa",
-      padding: "30px 20px",
+      padding: "2rem 1rem",
     },
     content: {
-      maxWidth: "1400px",
+      maxWidth: "1200px",
       margin: "0 auto",
     },
     header: {
       display: "flex",
-      justifyContent: "space-between",
-      alignItems: "center",
-      marginBottom: "30px",
-      flexWrap: "wrap",
-      gap: "20px",
+      flexDirection: "column",
+      gap: "1rem",
+      marginBottom: "2rem",
     },
     userInfo: {
       display: "flex",
       flexDirection: "column",
     },
     title: {
-      fontSize: "28px",
+      fontSize: "1.75rem",
       fontWeight: "700",
       color: "#1a237e",
       margin: "0",
     },
     subtitle: {
-      fontSize: "16px",
+      fontSize: "1rem",
       color: "#666",
-      margin: "4px 0 0 0",
+      margin: "0.25rem 0 0 0",
     },
     actionButtons: {
       display: "flex",
-      gap: "15px",
+      gap: "1rem",
       flexWrap: "wrap",
     },
+    button: {
+      padding: "0.75rem 1.5rem",
+      borderRadius: "8px",
+      fontSize: "0.9rem",
+      fontWeight: "600",
+      cursor: "pointer",
+      transition: "all 0.3s ease",
+      display: "flex",
+      alignItems: "center",
+      gap: "0.5rem",
+      border: "none",
+    },
     buttonPrimary: {
-      padding: "12px 24px",
       backgroundColor: "#1a237e",
       color: "white",
-      border: "none",
-      borderRadius: "8px",
-      fontSize: "15px",
-      fontWeight: "600",
-      cursor: "pointer",
-      transition: "all 0.3s ease",
-      display: "flex",
-      alignItems: "center",
-      gap: "8px",
     },
     buttonSecondary: {
-      padding: "12px 24px",
       backgroundColor: "#4fc3f7",
       color: "white",
-      border: "none",
-      borderRadius: "8px",
-      fontSize: "15px",
-      fontWeight: "600",
-      cursor: "pointer",
-      transition: "all 0.3s ease",
-      display: "flex",
-      alignItems: "center",
-      gap: "8px",
     },
     dashboardGrid: {
       display: "grid",
-      gridTemplateColumns: "repeat(auto-fit, minmax(400px, 1fr))",
-      gap: "24px",
-      marginBottom: "24px",
+      gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
+      gap: "1.5rem",
+      marginBottom: "2rem",
     },
     card: {
       backgroundColor: "white",
       borderRadius: "12px",
-      padding: "24px",
+      padding: "1.5rem",
       boxShadow: "0 4px 12px rgba(0,0,0,0.05)",
       height: "100%",
+      transition: "transform 0.3s ease, box-shadow 0.3s ease",
+      ":hover": {
+        transform: "translateY(-5px)",
+        boxShadow: "0 8px 20px rgba(0,0,0,0.1)",
+      },
     },
     sectionTitle: {
-      fontSize: "20px",
+      fontSize: "1.25rem",
       fontWeight: "600",
       color: "#1a237e",
-      marginBottom: "20px",
+      marginBottom: "1.5rem",
       display: "flex",
       alignItems: "center",
-      gap: "12px",
+      gap: "0.75rem",
     },
     serviceItem: {
       display: "flex",
       justifyContent: "space-between",
       alignItems: "center",
-      padding: "12px 0",
+      padding: "1rem 0",
       borderBottom: "1px solid #eee",
+      transition: "background-color 0.2s ease",
+      ":hover": {
+        backgroundColor: "#f8f9fa",
+      },
     },
     orderItem: {
-      padding: "12px 0",
+      padding: "1rem 0",
       borderBottom: "1px solid #eee",
+      transition: "background-color 0.2s ease",
+      ":hover": {
+        backgroundColor: "#f8f9fa",
+      },
     },
     statusBadge: (status) => ({
       backgroundColor:
@@ -369,58 +350,112 @@ function Dashboard() {
           : status === "REJECTED"
           ? "#c62828"
           : "#666",
-      padding: "4px 8px",
+      padding: "0.25rem 0.5rem",
       borderRadius: "4px",
-      fontSize: "12px",
+      fontSize: "0.75rem",
       fontWeight: "600",
       display: "inline-block",
     }),
     emptyState: {
       color: "#666",
-      fontSize: "14px",
+      fontSize: "0.9rem",
       textAlign: "center",
-      padding: "20px",
+      padding: "1.5rem",
     },
-    formInput: {
-      width: "100%",
-      padding: "12px 16px",
-      border: "1px solid #ddd",
-      borderRadius: "8px",
-      fontSize: "15px",
-      marginBottom: "16px",
-    },
-    formLabel: {
-      display: "block",
-      marginBottom: "8px",
+    viewAllButton: {
+      color: "#1a237e",
+      fontSize: "0.9rem",
       fontWeight: "500",
-      color: "#444",
-    },
-    buttonGroup: {
+      background: "none",
+      border: "none",
+      cursor: "pointer",
       display: "flex",
-      gap: "12px",
-      marginTop: "16px",
+      alignItems: "center",
+      gap: "0.25rem",
+      marginTop: "1rem",
+      marginLeft: "auto",
+    },
+    actionButtonGroup: {
+      display: "flex",
+      gap: "0.5rem",
+      justifyContent: "flex-end",
+      marginTop: "0.5rem",
+    },
+    smallButton: {
+      padding: "0.375rem 0.75rem",
+      fontSize: "0.75rem",
+      borderRadius: "6px",
+    },
+    snack: {
+      padding: "1rem",
+      borderRadius: "8px",
+      marginBottom: "1.5rem",
+      fontSize: "0.9rem",
+      display: "flex",
+      justifyContent: "space-between",
+      alignItems: "center",
     },
     snackSuccess: {
       backgroundColor: "#d4edda",
       color: "#155724",
-      padding: "12px 16px",
-      borderRadius: "8px",
-      marginBottom: "24px",
-      fontSize: "14px",
-      display: "flex",
-      justifyContent: "space-between",
-      alignItems: "center",
     },
     snackError: {
       backgroundColor: "#ffebee",
       color: "#c62828",
-      padding: "12px 16px",
+    },
+    formInput: {
+      width: "100%",
+      padding: "0.75rem 1rem",
+      border: "1px solid #ddd",
       borderRadius: "8px",
-      marginBottom: "24px",
-      fontSize: "14px",
-      display: "flex",
-      justifyContent: "space-between",
-      alignItems: "center",
+      fontSize: "0.9rem",
+      marginBottom: "1rem",
+    },
+    formLabel: {
+      display: "block",
+      marginBottom: "0.5rem",
+      fontWeight: "500",
+      color: "#444",
+    },
+    formGrid: {
+      display: "grid",
+      gridTemplateColumns: "1fr 1fr",
+      gap: "1rem",
+      "@media (max-width: 600px)": {
+        gridTemplateColumns: "1fr",
+      },
+    },
+    loadingSpinner: {
+      border: "4px solid #f3f3f3",
+      borderTop: "4px solid #1a237e",
+      borderRadius: "50%",
+      width: "40px",
+      height: "40px",
+      animation: "spin 1s linear infinite",
+      margin: "2rem auto",
+    },
+    "@media (max-width: 768px)": {
+      container: {
+        padding: "1.5rem 1rem",
+      },
+      dashboardGrid: {
+        gridTemplateColumns: "1fr",
+      },
+      card: {
+        padding: "1.25rem",
+      },
+    },
+    "@media (max-width: 480px)": {
+      title: {
+        fontSize: "1.5rem",
+      },
+      subtitle: {
+        fontSize: "0.9rem",
+      },
+      button: {
+        padding: "0.6rem 1rem",
+        fontSize: "0.8rem",
+      },
     },
   };
 
@@ -428,23 +463,7 @@ function Dashboard() {
     <div style={styles.container}>
       <div style={styles.content}>
         {(isLoading || localLoading) && (
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "center",
-              padding: "40px",
-            }}
-          >
-            <div
-              style={{
-                border: "4px solid #f3f3f3",
-                borderTop: "4px solid #1a237e",
-                borderRadius: "50%",
-                width: "40px",
-                height: "40px",
-                animation: "spin 1s linear infinite",
-              }}
-            ></div>
+          <div style={styles.loadingSpinner}>
             <style>{`@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`}</style>
           </div>
         )}
@@ -466,14 +485,14 @@ function Dashboard() {
               <div style={styles.actionButtons}>
                 <button
                   onClick={() => navigate("/services")}
-                  style={styles.buttonSecondary}
+                  style={{ ...styles.button, ...styles.buttonSecondary }}
                 >
                   <FaSearch /> Explore Services
                 </button>
                 {(user.isSeller || user.role.toLowerCase() === "both") && (
                   <button
                     onClick={() => navigate("/add-service")}
-                    style={styles.buttonPrimary}
+                    style={{ ...styles.button, ...styles.buttonPrimary }}
                   >
                     <FaPlus /> Add Service
                   </button>
@@ -481,32 +500,14 @@ function Dashboard() {
               </div>
             </div>
 
-            {storeError && (
-              <div style={styles.snackError}>
-                <span>{storeError}</span>
-                <button
-                  onClick={() => useStore.setState({ error: null })}
-                  style={{
-                    background: "none",
-                    border: "none",
-                    color: "inherit",
-                    cursor: "pointer",
-                    fontSize: "14px",
-                    fontWeight: "600",
-                  }}
-                >
-                  Close
-                </button>
-              </div>
-            )}
-
             {snack.show && (
               <div
-                style={
-                  snack.type === "success"
+                style={{
+                  ...styles.snack,
+                  ...(snack.type === "success"
                     ? styles.snackSuccess
-                    : styles.snackError
-                }
+                    : styles.snackError),
+                }}
               >
                 <span>{snack.message}</span>
                 <button
@@ -526,6 +527,7 @@ function Dashboard() {
             )}
 
             <div style={styles.dashboardGrid}>
+              {/* Your Services Card */}
               {(user.isSeller || user.role.toLowerCase() === "both") && (
                 <div style={styles.card}>
                   <h2 style={styles.sectionTitle}>
@@ -538,28 +540,25 @@ function Dashboard() {
                           <div>
                             <h3
                               style={{
-                                fontSize: "16px",
+                                fontSize: "1rem",
                                 fontWeight: "500",
-                                marginBottom: "4px",
+                                marginBottom: "0.25rem",
                               }}
                             >
                               {service.title}
                             </h3>
-                            <p style={{ fontSize: "14px", color: "#666" }}>
+                            <p style={{ fontSize: "0.875rem", color: "#666" }}>
                               KSh {service.price}
-                            </p>
-                            <p style={{ fontSize: "14px", color: "#666" }}>
-                              Category: {service.category}
                             </p>
                           </div>
                           <Link
                             to={`/services/${service.category}`}
                             style={{
                               color: "#4fc3f7",
-                              fontSize: "14px",
+                              fontSize: "0.875rem",
                               display: "flex",
                               alignItems: "center",
-                              gap: "4px",
+                              gap: "0.25rem",
                             }}
                           >
                             View <FaChevronRight size={12} />
@@ -567,36 +566,32 @@ function Dashboard() {
                         </div>
                       ))}
                       {userServices.length > 4 && (
-                        <div style={{ textAlign: "right", marginTop: "12px" }}>
-                          <button
-                            onClick={() => navigate("/dashboard/services")}
-                            style={{
-                              color: "#1a237e",
-                              fontSize: "14px",
-                              fontWeight: "500",
-                              background: "none",
-                              border: "none",
-                              cursor: "pointer",
-                            }}
-                          >
-                            View all ({userServices.length})
-                          </button>
-                        </div>
+                        <button
+                          onClick={() => navigate("/dashboard/services")}
+                          style={styles.viewAllButton}
+                        >
+                          View all ({userServices.length}){" "}
+                          <FaChevronRight size={12} />
+                        </button>
                       )}
                     </div>
                   ) : (
                     <p style={styles.emptyState}>
                       No services added yet.{" "}
-                      <Link to="/add-service">Add a service</Link>.
+                      <Link to="/add-service" style={{ color: "#1a237e" }}>
+                        Add a service
+                      </Link>
+                      .
                     </p>
                   )}
                 </div>
               )}
 
+              {/* New Orders Card */}
               {(user.isSeller || user.role.toLowerCase() === "both") && (
                 <div style={styles.card}>
                   <h2 style={styles.sectionTitle}>
-                    <FaShoppingCart /> New Orders to Deliver
+                    <FaShoppingCart /> New Orders
                   </h2>
                   {sellerOrders?.newOrders?.length > 0 ? (
                     <div>
@@ -612,18 +607,17 @@ function Dashboard() {
                             <div>
                               <p
                                 style={{
-                                  fontSize: "15px",
+                                  fontSize: "0.9375rem",
                                   fontWeight: "500",
-                                  marginBottom: "4px",
+                                  marginBottom: "0.25rem",
                                 }}
                               >
                                 Order #{order.id.slice(0, 8)}
                               </p>
-                              <p style={{ fontSize: "14px", color: "#666" }}>
-                                Service: {order.serviceTitle || "Unknown"}
-                              </p>
-                              <p style={{ fontSize: "14px", color: "#666" }}>
-                                Customer: {order.buyerName || "Unknown"}
+                              <p
+                                style={{ fontSize: "0.875rem", color: "#666" }}
+                              >
+                                {order.serviceTitle || "Unknown"}
                               </p>
                             </div>
                             <span style={styles.statusBadge(order.status)}>
@@ -631,61 +625,46 @@ function Dashboard() {
                             </span>
                           </div>
                           {order.status === "PENDING" && (
-                            <div
-                              style={{
-                                display: "flex",
-                                gap: "10px",
-                                justifyContent: "flex-end",
-                                marginTop: "8px",
-                              }}
-                            >
+                            <div style={styles.actionButtonGroup}>
                               <button
                                 onClick={() =>
                                   handleOrderUpdate(order.id, "ACCEPTED")
                                 }
                                 style={{
+                                  ...styles.button,
                                   ...styles.buttonPrimary,
-                                  padding: "6px 12px",
-                                  fontSize: "13px",
+                                  ...styles.smallButton,
                                 }}
                                 disabled={localLoading}
                               >
-                                Accept
+                                <FaRegCheckCircle /> Accept
                               </button>
                               <button
                                 onClick={() =>
                                   handleOrderUpdate(order.id, "REJECTED")
                                 }
                                 style={{
-                                  ...styles.buttonSecondary,
-                                  padding: "6px 12px",
-                                  fontSize: "13px",
+                                  ...styles.button,
+                                  ...styles.smallButton,
                                   backgroundColor: "#f44336",
+                                  color: "white",
                                 }}
                                 disabled={localLoading}
                               >
-                                Reject
+                                <FaRegTimesCircle /> Reject
                               </button>
                             </div>
                           )}
                         </div>
                       ))}
                       {sellerOrders.newOrders.length > 4 && (
-                        <div style={{ textAlign: "right", marginTop: "12px" }}>
-                          <button
-                            onClick={handleViewAllOrders}
-                            style={{
-                              color: "#1a237e",
-                              fontSize: "14px",
-                              fontWeight: "500",
-                              background: "none",
-                              border: "none",
-                              cursor: "pointer",
-                            }}
-                          >
-                            View View all ({sellerOrders.newOrders.length})
-                          </button>
-                        </div>
+                        <button
+                          onClick={handleViewAllOrders}
+                          style={styles.viewAllButton}
+                        >
+                          View all ({sellerOrders.newOrders.length}){" "}
+                          <FaChevronRight size={12} />
+                        </button>
                       )}
                     </div>
                   ) : (
@@ -694,6 +673,7 @@ function Dashboard() {
                 </div>
               )}
 
+              {/* Your Orders Card (for buyers) */}
               {(user.role.toLowerCase() === "buyer" ||
                 user.role.toLowerCase() === "both") && (
                 <div style={styles.card}>
@@ -717,32 +697,27 @@ function Dashboard() {
                               <div>
                                 <p
                                   style={{
-                                    fontSize: "15px",
+                                    fontSize: "0.9375rem",
                                     fontWeight: "500",
-                                    marginBottom: "4px",
+                                    marginBottom: "0.25rem",
                                   }}
                                 >
                                   Order #{order.id.slice(0, 8)}
                                 </p>
-                                <p style={{ fontSize: "14px", color: "#666" }}>
-                                  Service: {order.serviceTitle || "Unknown"}
-                                </p>
-                                <p style={{ fontSize: "14px", color: "#666" }}>
-                                  Seller: {order.sellerName || "Unknown"}
+                                <p
+                                  style={{
+                                    fontSize: "0.875rem",
+                                    color: "#666",
+                                  }}
+                                >
+                                  {order.serviceTitle || "Unknown"}
                                 </p>
                               </div>
                               <span style={styles.statusBadge(order.status)}>
                                 {order.status}
                               </span>
                             </div>
-                            <div
-                              style={{
-                                display: "flex",
-                                gap: "10px",
-                                justifyContent: "flex-end",
-                                marginTop: "8px",
-                              }}
-                            >
+                            <div style={styles.actionButtonGroup}>
                               <button
                                 onClick={() =>
                                   openChat({
@@ -751,9 +726,9 @@ function Dashboard() {
                                   })
                                 }
                                 style={{
+                                  ...styles.button,
                                   ...styles.buttonSecondary,
-                                  padding: "6px 12px",
-                                  fontSize: "13px",
+                                  ...styles.smallButton,
                                 }}
                                 disabled={localLoading || !order.sellerId}
                               >
@@ -764,26 +739,17 @@ function Dashboard() {
                         ))}
                       {orders.filter((order) => order.role === "BUYER").length >
                         4 && (
-                        <div style={{ textAlign: "right", marginTop: "12px" }}>
-                          <button
-                            onClick={handleViewAllOrders}
-                            style={{
-                              color: "#1a237e",
-                              fontSize: "14px",
-                              fontWeight: "500",
-                              background: "none",
-                              border: "none",
-                              cursor: "pointer",
-                            }}
-                          >
-                            View all (
-                            {
-                              orders.filter((order) => order.role === "BUYER")
-                                .length
-                            }
-                            )
-                          </button>
-                        </div>
+                        <button
+                          onClick={handleViewAllOrders}
+                          style={styles.viewAllButton}
+                        >
+                          View all (
+                          {
+                            orders.filter((order) => order.role === "BUYER")
+                              .length
+                          }
+                          ) <FaChevronRight size={12} />
+                        </button>
                       )}
                     </div>
                   ) : (
@@ -792,6 +758,7 @@ function Dashboard() {
                 </div>
               )}
 
+              {/* Become a Seller Card */}
               {!(user.isSeller || user.role.toLowerCase() === "both") && (
                 <div style={styles.card}>
                   <h2 style={styles.sectionTitle}>
@@ -800,8 +767,8 @@ function Dashboard() {
                   <p
                     style={{
                       color: "#666",
-                      marginBottom: "20px",
-                      fontSize: "14px",
+                      marginBottom: "1.25rem",
+                      fontSize: "0.9rem",
                     }}
                   >
                     Start offering your services and earn money by joining our
@@ -809,13 +776,14 @@ function Dashboard() {
                   </p>
                   <button
                     onClick={() => setShowForm(true)}
-                    style={styles.buttonPrimary}
+                    style={{ ...styles.button, ...styles.buttonPrimary }}
                   >
                     <FaStore /> Register as Seller
                   </button>
                 </div>
               )}
 
+              {/* Order History Card */}
               {(user.role.toLowerCase() === "buyer" ||
                 user.role.toLowerCase() === "both" ||
                 user.isSeller ||
@@ -846,25 +814,20 @@ function Dashboard() {
                               <div>
                                 <p
                                   style={{
-                                    fontSize: "15px",
+                                    fontSize: "0.9375rem",
                                     fontWeight: "500",
-                                    marginBottom: "4px",
+                                    marginBottom: "0.25rem",
                                   }}
                                 >
                                   Order #{order.id.slice(0, 8)}
                                 </p>
-                                <p style={{ fontSize: "14px", color: "#666" }}>
-                                  Service: {order.serviceTitle || "Unknown"}
-                                </p>
-                                <p style={{ fontSize: "14px", color: "#666" }}>
-                                  {user.isSeller ||
-                                  user.role.toLowerCase() === "both"
-                                    ? `Customer: ${
-                                        order.buyerName || "Unknown"
-                                      }`
-                                    : `Seller: ${
-                                        order.sellerName || "Unknown"
-                                      }`}
+                                <p
+                                  style={{
+                                    fontSize: "0.875rem",
+                                    color: "#666",
+                                  }}
+                                >
+                                  {order.serviceTitle || "Unknown"}
                                 </p>
                               </div>
                               <span style={styles.statusBadge(order.status)}>
@@ -875,14 +838,7 @@ function Dashboard() {
                               user.isSeller ||
                               user.role.toLowerCase() === "both"
                             ) && (
-                              <div
-                                style={{
-                                  display: "flex",
-                                  gap: "10px",
-                                  justifyContent: "flex-end",
-                                  marginTop: "8px",
-                                }}
-                              >
+                              <div style={styles.actionButtonGroup}>
                                 <button
                                   onClick={() =>
                                     openChat({
@@ -891,9 +847,9 @@ function Dashboard() {
                                     })
                                   }
                                   style={{
+                                    ...styles.button,
                                     ...styles.buttonSecondary,
-                                    padding: "6px 12px",
-                                    fontSize: "13px",
+                                    ...styles.smallButton,
                                   }}
                                   disabled={localLoading || !order.sellerId}
                                 >
@@ -909,26 +865,17 @@ function Dashboard() {
                           : orders.filter((order) => order.role === "BUYER") ||
                             []),
                       ].length > 5 && (
-                        <div style={{ textAlign: "right", marginTop: "12px" }}>
-                          <button
-                            onClick={handleViewAllOrders}
-                            style={{
-                              color: "#1a237e",
-                              fontSize: "14px",
-                              fontWeight: "500",
-                              background: "none",
-                              border: "none",
-                              cursor: "pointer",
-                            }}
-                          >
-                            View all (
-                            {user.isSeller || user.role.toLowerCase() === "both"
-                              ? sellerOrders?.orderHistory?.length || 0
-                              : orders.filter((order) => order.role === "BUYER")
-                                  .length || 0}
-                            )
-                          </button>
-                        </div>
+                        <button
+                          onClick={handleViewAllOrders}
+                          style={styles.viewAllButton}
+                        >
+                          View all (
+                          {user.isSeller || user.role.toLowerCase() === "both"
+                            ? sellerOrders?.orderHistory?.length || 0
+                            : orders.filter((order) => order.role === "BUYER")
+                                .length || 0}
+                          ) <FaChevronRight size={12} />
+                        </button>
                       )}
                     </div>
                   ) : (
@@ -938,8 +885,9 @@ function Dashboard() {
               )}
             </div>
 
+            {/* Seller Registration Form */}
             {showForm && (
-              <div style={{ ...styles.card, marginTop: "24px" }}>
+              <div style={{ ...styles.card, marginTop: "1.5rem" }}>
                 <h2 style={styles.sectionTitle}>Seller Registration</h2>
                 <form
                   onSubmit={(e) => {
@@ -959,13 +907,7 @@ function Dashboard() {
                       required
                     />
                   </div>
-                  <div
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns: "1fr 1fr",
-                      gap: "16px",
-                    }}
-                  >
+                  <div style={styles.formGrid}>
                     <div>
                       <label style={styles.formLabel}>Phone Number</label>
                       <input
@@ -997,13 +939,7 @@ function Dashboard() {
                       />
                     </div>
                   </div>
-                  <div
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns: "1fr 1fr",
-                      gap: "16px",
-                    }}
-                  >
+                  <div style={styles.formGrid}>
                     <div>
                       <label style={styles.formLabel}>Gender</label>
                       <select
@@ -1033,14 +969,16 @@ function Dashboard() {
                             profilePhoto: e.target.files[0],
                           })
                         }
-                        style={{ ...styles.formInput, padding: "8px" }}
+                        style={{ ...styles.formInput, padding: "0.5rem" }}
                       />
                     </div>
                   </div>
-                  <div style={styles.buttonGroup}>
+                  <div
+                    style={{ display: "flex", gap: "1rem", marginTop: "1rem" }}
+                  >
                     <button
                       type="submit"
-                      style={styles.buttonPrimary}
+                      style={{ ...styles.button, ...styles.buttonPrimary }}
                       disabled={localLoading}
                     >
                       {localLoading ? "Processing..." : "Submit Application"}
@@ -1049,8 +987,9 @@ function Dashboard() {
                       type="button"
                       onClick={() => setShowForm(false)}
                       style={{
-                        ...styles.buttonPrimary,
+                        ...styles.button,
                         backgroundColor: "#666",
+                        color: "white",
                       }}
                     >
                       Cancel

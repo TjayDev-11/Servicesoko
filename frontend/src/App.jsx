@@ -59,7 +59,8 @@ class ErrorBoundary extends Component {
 function App() {
   const {
     isAuthenticated,
-    isTokenValid,
+    token,
+    validateToken,
     setToken,
     bootstrapped,
     setBootstrapped,
@@ -67,19 +68,47 @@ function App() {
 
   useEffect(() => {
     const bootstrapAuth = async () => {
+      console.log(
+        "bootstrapAuth called, token:",
+        token ? token.substring(0, 10) + "..." : "null"
+      );
       const storedToken = localStorage.getItem("authToken");
       if (storedToken) {
-        const user = await isTokenValid(storedToken);
+        console.log("Validating stored token");
+        const user = await validateToken(storedToken);
         if (user) {
-          await setToken(storedToken, user);
+          console.log("Token valid, setting token and user");
+          await setToken(
+            storedToken,
+            user,
+            localStorage.getItem("refreshToken")
+          );
         } else {
-          await setToken(null);
+          console.log("Token invalid, clearing token");
+          await setToken(null, null, null);
         }
+      } else {
+        console.log("No stored token, setting isAuthenticated to false");
+        await setToken(null, null, null);
       }
+      // Delay to ensure isAuthenticated is updated
+      await new Promise((resolve) => setTimeout(resolve, 500));
       setBootstrapped(true);
+      console.log("Bootstrap complete, isAuthenticated:", isAuthenticated);
     };
     bootstrapAuth();
-  }, [setToken, isTokenValid, setBootstrapped]);
+  }, [token, validateToken, setToken, setBootstrapped]);
+
+  console.log(
+    "App render, isAuthenticated:",
+    isAuthenticated,
+    "bootstrapped:",
+    bootstrapped
+  );
+  console.log(
+    "Rendering route for /dashboard:",
+    isAuthenticated ? "Dashboard" : "Navigate to /login"
+  );
 
   if (!bootstrapped) {
     return (
@@ -111,13 +140,21 @@ function App() {
             <Route
               path="/login"
               element={
-                isAuthenticated ? <Navigate to="/dashboard" /> : <Login />
+                isAuthenticated ? (
+                  <Navigate to="/dashboard" replace />
+                ) : (
+                  <Login />
+                )
               }
             />
             <Route
               path="/signup"
               element={
-                isAuthenticated ? <Navigate to="/dashboard" /> : <Signup />
+                isAuthenticated ? (
+                  <Navigate to="/dashboard" replace />
+                ) : (
+                  <Signup />
+                )
               }
             />
             <Route
@@ -128,7 +165,7 @@ function App() {
                     <Dashboard />
                   </ErrorBoundary>
                 ) : (
-                  <Navigate to="/login" />
+                  <Navigate to="/login" replace />
                 )
               }
             />
@@ -140,7 +177,7 @@ function App() {
                     <Messages />
                   </ErrorBoundary>
                 ) : (
-                  <Navigate to="/login" />
+                  <Navigate to="/login" replace />
                 )
               }
             />
@@ -151,16 +188,24 @@ function App() {
             <Route
               path="/add-service"
               element={
-                isAuthenticated ? <AddService /> : <Navigate to="/login" />
+                isAuthenticated ? (
+                  <AddService />
+                ) : (
+                  <Navigate to="/login" replace />
+                )
               }
             />
             <Route
               path="/profile"
-              element={isAuthenticated ? <Profile /> : <Navigate to="/login" />}
+              element={
+                isAuthenticated ? <Profile /> : <Navigate to="/login" replace />
+              }
             />
             <Route
               path="/orders"
-              element={isAuthenticated ? <Orders /> : <Navigate to="/login" />}
+              element={
+                isAuthenticated ? <Orders /> : <Navigate to="/login" replace />
+              }
             />
             <Route path="/forgot-password" element={<ForgotPassword />} />
             <Route path="/reset-password" element={<ResetPassword />} />

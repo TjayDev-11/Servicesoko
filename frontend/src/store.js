@@ -2,290 +2,345 @@ import { create } from "zustand";
 import { jwtDecode } from "jwt-decode";
 import api from "./api";
 
-// Cache token validation for 30 seconds
-let lastTokenValidation = 0;
-let cachedTokenValidation = null;
-
-export const validateToken = async (token) => {
-  const now = Date.now();
-  if (cachedTokenValidation && now - lastTokenValidation < 30000) {
-    return cachedTokenValidation;
-  }
-
-  try {
-    const response = await api.get("/auth/validate-token", {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    cachedTokenValidation = response.data.valid ? response.data.user : false;
-    lastTokenValidation = now;
-    return cachedTokenValidation;
-  } catch (error) {
-    console.error("Token validation failed:", error.message);
-    return false;
-  }
-};
-
-const useStore = create((set, get) => ({
+const useStore = create((set) => ({
   token: localStorage.getItem("authToken") || null,
   user: null,
   isAuthenticated: false,
-  isLoading: false,
-  error: null,
   services: [],
   userServices: [],
   orders: [],
   sellerOrders: { newOrders: [], orderHistory: [], newOrdersCount: 0 },
   conversations: [],
-  reviews: [],
-  currentServiceReviews: [],
-  newOrdersCount: 0,
   unreadMessagesCount: 0,
+  isLoading: false,
   bootstrapped: false,
 
-  setLoading: (loading) => set({ isLoading: loading }),
-  setBootstrapped: (value) => set({ bootstrapped: value }),
-  setError: (error) => set({ error }),
-
-  isTokenValid: async (token) => {
-    if (!token) return false;
-
-    try {
-      const decoded = jwtDecode(token);
-      if (decoded.exp < Date.now() / 1000) {
-        const refreshToken = localStorage.getItem("refreshToken");
-        if (!refreshToken) return false;
-
-        const response = await api.post("/auth/refresh", { refreshToken });
-        const newAccessToken = response.data.accessToken;
-        localStorage.setItem("authToken", newAccessToken);
-        set({ token: newAccessToken });
-        return true;
-      }
-      return true;
-    } catch (error) {
-      console.error("Token validation error:", error.message);
-      return false;
-    }
+  setBootstrapped: (value) => {
+    console.log("setBootstrapped:", value);
+    set({ bootstrapped: value });
   },
 
-  setToken: async (token, userData = null, refreshToken = null) => {
-    if (!token) {
-      localStorage.removeItem("authToken");
-      localStorage.removeItem("refreshToken");
-      localStorage.removeItem("loginCredentials");
-      set({
-        token: null,
-        user: null,
-        isAuthenticated: false,
-        error: null,
-        services: [],
-        userServices: [],
-        orders: [],
-        sellerOrders: { newOrders: [], orderHistory: [], newOrdersCount: 0 },
-        conversations: [],
-        reviews: [],
-        currentServiceReviews: [],
-        newOrdersCount: 0,
-        unreadMessagesCount: 0,
-        bootstrapped: true,
-      });
-      return;
-    }
-
+  setToken: (token, user, refreshToken) => {
+    console.log("setToken called with:", {
+      token: token?.substring(0, 10) + "...",
+      user,
+      refreshToken: refreshToken?.substring(0, 10) + "...",
+    });
     localStorage.setItem("authToken", token);
     if (refreshToken) localStorage.setItem("refreshToken", refreshToken);
-
-    set({
-      token,
-      isAuthenticated: true,
-      user: userData || null,
-      error: null,
+    set({ token, user, isAuthenticated: !!token && !!user });
+    console.log("Token, user, and isAuthenticated state updated:", {
+      isAuthenticated: !!token && !!user,
     });
-
-    if (!userData) {
-      await get().refreshUser(token);
-    }
-    set({ bootstrapped: true });
   },
 
   clear: () => {
+    console.log("Clearing store state");
     localStorage.removeItem("authToken");
     localStorage.removeItem("refreshToken");
-    localStorage.removeItem("loginCredentials");
     set({
       token: null,
       user: null,
       isAuthenticated: false,
-      isLoading: false,
-      error: null,
       services: [],
       userServices: [],
       orders: [],
       sellerOrders: { newOrders: [], orderHistory: [], newOrdersCount: 0 },
       conversations: [],
-      reviews: [],
-      currentServiceReviews: [],
-      newOrdersCount: 0,
       unreadMessagesCount: 0,
-      bootstrapped: true,
     });
   },
 
-  refreshUser: async (token) => {
-    if (!token) return;
+  setLoading: (isLoading) => set({ isLoading }),
 
-    set({ isLoading: true });
+  isTokenValid: async () => {
+    const token = localStorage.getItem("authToken");
+    if (!token) {
+      console.log("No token provided for isTokenValid");
+      set({ isAuthenticated: false });
+      return false;
+    }
     try {
-      const response = await api.get("/api/profile", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      set({
-        user: {
-          ...response.data.user,
-          isSeller: ["seller", "both"].includes(
-            response.data.user.role?.toLowerCase()
-          ),
-          profileComplete: response.data.user.profileComplete,
-        },
-        isAuthenticated: true,
-        isLoading: false,
-        error: null,
-      });
-
-      if (["seller", "both"].includes(response.data.user.role?.toLowerCase())) {
-        await get().fetchUserServices(token);
-        await get().fetchSellerOrders(token); // Fetch seller orders on user refresh
+      const decoded = jwtDecode(token);
+      if (decoded.exp < Date.now() / 1000) {
+        console.log("Token expired, relying on api.js interceptor for refresh");
+        set({ isAuthenticated: false });
+        return false;
       }
+      console.log("Token not expired, validating with server");
+      const user = await useStore.getState().validateToken();
+      const isValid = !!user;
+      set({ isAuthenticated: isValid });
+      console.log("isTokenValid result:", isValid);
+      return isValid;
     } catch (error) {
+      console.error("Token validation error:", {
+        message: error.message,
+        status: error.response?.status,
+      });
+      set({ isAuthenticated: false });
+      return false;
+    }
+  },
+
+  validateToken: async () => {
+    const token = localStorage.getItem("authToken");
+    if (!token) {
+      console.log("No token provided for validateToken");
+      set({ isAuthenticated: false });
+      return false;
+    }
+    try {
+      console.log("Validating token with /auth/validate-token");
+      const response = await api.get("/auth/validate-token");
+      console.log("Validate token response:", response.data);
+      if (response.data.valid) {
+        set({ user: response.data.user, isAuthenticated: true });
+        console.log("Token validated, user set:", response.data.user);
+        return response.data.user;
+      }
+      console.log("Token validation failed: not valid");
+      set({ isAuthenticated: false });
+      return false;
+    } catch (error) {
+      console.error("Token validation failed:", {
+        message: error.message,
+        status: error.response?.status,
+        data: error.response?.data,
+      });
+      if (error.response?.status === 401) {
+        console.log("401 error, api.js interceptor should handle refresh");
+        set({ isAuthenticated: false });
+        return false;
+      } else if (error.response?.status === 403) {
+        console.log("403 error, treating as invalid token or permission issue");
+        set({ isAuthenticated: false });
+        localStorage.removeItem("authToken");
+        localStorage.removeItem("refreshToken");
+        window.location.href = "/login";
+        return false;
+      }
+      console.log("Unexpected error during token validation");
+      set({ isAuthenticated: false });
+      return false;
+    }
+  },
+
+  refreshUser: async () => {
+    set({ isLoading: true });
+    try {
+      console.log("Refreshing user profile");
+      const response = await api.get("/api/profile");
+      const updatedUser = response.data.user;
+
       set({
-        user: null,
-        isAuthenticated: false,
+        user: updatedUser,
         isLoading: false,
-        error: "Failed to refresh user",
+        isAuthenticated: true,
       });
+
+      console.log("User profile refreshed:", updatedUser);
+      return updatedUser;
+    } catch (error) {
+      console.error("Refresh user error:", {
+        message: error.message,
+        status: error.response?.status,
+      });
+
+      // If unauthorized, clear auth state
+      if (error.response?.status === 401) {
+        set({
+          isLoading: false,
+          isAuthenticated: false,
+          user: null,
+          token: null,
+        });
+        localStorage.removeItem("authToken");
+        localStorage.removeItem("refreshToken");
+      } else {
+        set({ isLoading: false });
+      }
+
+      throw error;
     }
   },
 
-  fetchServices: async (token) => {
+  fetchServices: async () => {
     set({ isLoading: true });
     try {
-      const response = await api.get("/api/services", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      set({ services: response.data.services || [], isLoading: false });
+      const response = await api.get("/api/services");
+      set({ services: response.data.services, isLoading: false });
     } catch (error) {
-      set({ services: [], isLoading: false });
-    }
-  },
-
-  fetchUserServices: async (token) => {
-    set({ isLoading: true });
-    try {
-      const response = await api.get("/api/services/user", {
-        headers: { Authorization: `Bearer ${token}` },
+      console.error("Fetch services error:", {
+        message: error.message,
+        status: error.response?.status,
       });
-      set({ userServices: response.data.services || [], isLoading: false });
-    } catch (error) {
-      set({ userServices: [], isLoading: false });
-    }
-  },
-
-  addService: async (token, serviceData) => {
-    set({ isLoading: true });
-    try {
-      const response = await api.post("/api/services", serviceData, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      set((state) => ({
-        userServices: [...state.userServices, response.data.service],
-        isLoading: false,
-      }));
-      return response.data;
-    } catch (error) {
       set({ isLoading: false });
-      throw new Error(error.response?.data?.error || "Failed to add service");
+      throw error;
     }
   },
 
-  fetchOrders: async (token) => {
+  fetchUserServices: async () => {
     set({ isLoading: true });
     try {
-      const response = await api.get("/api/orders?limit=5", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      // Filter to only include buyer orders
-      const buyerOrders = response.data.orders.filter(
-        (order) => order.role === "BUYER"
-      );
-      set({ orders: buyerOrders || [], isLoading: false });
+      const response = await api.get("/api/services/user");
+      set({ userServices: response.data.services, isLoading: false });
     } catch (error) {
-      console.error("Fetch orders error:", error);
-      set({ orders: [], isLoading: false });
+      console.error("Fetch user services error:", {
+        message: error.message,
+        status: error.response?.status,
+      });
+      set({ isLoading: false });
+      throw error;
     }
   },
 
-  fetchSellerOrders: async (token) => {
+  fetchOrders: async () => {
     set({ isLoading: true });
     try {
-      const response = await api.get("/api/seller-orders?limit=5", {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      set({
-        sellerOrders: {
-          newOrders: response.data.newOrders || [],
-          orderHistory: response.data.orderHistory || [],
-          newOrdersCount: response.data.newOrdersCount || 0,
-        },
-        newOrdersCount: response.data.newOrdersCount || 0,
-        isLoading: false,
-      });
+      const response = await api.get("/api/orders?limit=5");
+      set({ orders: response.data.orders, isLoading: false });
     } catch (error) {
-      console.error("Fetch seller orders error:", error);
-      set({
-        sellerOrders: { newOrders: [], orderHistory: [], newOrdersCount: 0 },
-        newOrdersCount: 0,
-        isLoading: false,
+      console.error("Fetch orders error:", {
+        message: error.message,
+        status: error.response?.status,
       });
+      set({ isLoading: false });
+      throw error;
     }
   },
 
-  updateOrderStatus: (orderId, newStatus) => {
-    set((state) => {
-      const updatedNewOrders = state.sellerOrders.newOrders.map((order) =>
-        order.id === orderId ? { ...order, status: newStatus } : order
-      );
-      const newOrdersCount = updatedNewOrders.filter(
-        (order) => order.status === "PENDING"
-      ).length;
-      return {
-        sellerOrders: {
-          ...state.sellerOrders,
-          newOrders: updatedNewOrders,
-          newOrdersCount,
-        },
-        newOrdersCount,
-      };
-    });
-  },
-
-  fetchConversations: async (token) => {
+  fetchSellerOrders: async () => {
     set({ isLoading: true });
     try {
-      const response = await api.get("/api/conversations?limit=5", {
-        headers: { Authorization: `Bearer ${token}` },
+      const response = await api.get("/api/seller-orders?limit=5");
+      set({ sellerOrders: response.data, isLoading: false });
+    } catch (error) {
+      console.error("Fetch seller orders error:", {
+        message: error.message,
+        status: error.response?.status,
       });
-      const unreadMessagesCount = (response.data.conversations || []).reduce(
+      set({ isLoading: false });
+      throw error;
+    }
+  },
+
+  fetchConversations: async () => {
+    set({ isLoading: true });
+    try {
+      const response = await api.get("/api/conversations?limit=5");
+      const conversations = Array.isArray(response.data.conversations)
+        ? response.data.conversations
+        : [];
+      const unreadMessagesCount = conversations.reduce(
         (sum, conv) => sum + (conv.unreadCount || 0),
         0
       );
       set({
-        conversations: response.data.conversations || [],
+        conversations,
         unreadMessagesCount,
         isLoading: false,
       });
     } catch (error) {
+      console.error("Fetch conversations error:", {
+        message: error.message,
+        status: error.response?.status,
+      });
       set({ conversations: [], unreadMessagesCount: 0, isLoading: false });
+      throw error;
+    }
+  },
+
+  updateOrderStatusLocal: (orderId, status) => {
+    set((state) => ({
+      orders: state.orders.map((order) =>
+        order.id === orderId ? { ...order, status } : order
+      ),
+      sellerOrders: {
+        ...state.sellerOrders,
+        newOrders: state.sellerOrders.newOrders.map((order) =>
+          order.id === orderId ? { ...order, status } : order
+        ),
+        orderHistory: state.sellerOrders.orderHistory.map((order) =>
+          order.id === orderId ? { ...order, status } : order
+        ),
+      },
+    }));
+  },
+
+  updateOrderStatusApi: async (orderId, status) => {
+    set({ isLoading: true });
+    try {
+      let endpoint;
+      switch (status.toUpperCase()) {
+        case "ACCEPTED":
+          endpoint = `/api/orders/${orderId}/accept`;
+          break;
+        case "REJECTED":
+          endpoint = `/api/orders/${orderId}/reject`;
+          break;
+        case "COMPLETED":
+          endpoint = `/api/orders/${orderId}/complete`;
+          break;
+        case "CANCELLED":
+          endpoint = `/api/orders/${orderId}/cancel`;
+          break;
+        default:
+          throw new Error(`Unsupported order status: ${status}`);
+      }
+      console.log(
+        `Updating order ${orderId} to status ${status} via ${endpoint}`
+      );
+      const response = await api.put(endpoint);
+      console.log(`Order ${orderId} updated to ${status}:`, response.data);
+      set((state) => ({
+        orders: state.orders.map((order) =>
+          order.id === orderId ? { ...order, status } : order
+        ),
+        sellerOrders: {
+          ...state.sellerOrders,
+          newOrders: state.sellerOrders.newOrders.map((order) =>
+            order.id === orderId ? { ...order, status } : order
+          ),
+          orderHistory: state.sellerOrders.orderHistory.map((order) =>
+            order.id === orderId ? { ...order, status } : order
+          ),
+        },
+        isLoading: false,
+      }));
+      return response.data;
+    } catch (error) {
+      console.error("Order update error:", {
+        message: error.message,
+        status: error.response?.status,
+        data: error.response?.data,
+      });
+      set({ isLoading: false });
+      throw error;
+    }
+  },
+  updateProfile: async (formData) => {
+    set({ isLoading: true });
+    try {
+      console.log("Updating profile with data:", formData);
+      const response = await api.put("/api/profile", formData, {
+        headers: {
+          "Content-Type": "multipart/form-data",
+        },
+      });
+
+      // Refresh user data after successful update
+      await useStore.getState().refreshUser();
+
+      set({ isLoading: false });
+      return response.data;
+    } catch (error) {
+      console.error("Profile update error:", {
+        message: error.message,
+        status: error.response?.status,
+      });
+      set({ isLoading: false });
+      throw error;
     }
   },
 }));
