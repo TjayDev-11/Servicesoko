@@ -31,6 +31,7 @@ model User {
   email            String?         @unique @db.VarChar(255)
   password         String          @db.VarChar(255)
   phone            String?         @unique @db.VarChar(20)
+  location         String?
   role             UserRole        @default(BUYER)
   sellerProfile    SellerProfile?
   orders           Order[]         @relation("UserToOrder")

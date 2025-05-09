@@ -67,12 +67,14 @@ router.get("/profile", authenticateToken, profileLimiter, async (req, res) => {
         id: true,
         email: true,
         phone: true,
+        location: true, // Added to return user.location
         role: true,
         name: true,
         sellerProfile: {
           select: {
             location: true,
             gender: true,
+            phone: true,
             profilePhoto: true,
             services: true,
             experience: true,
@@ -111,76 +113,125 @@ router.get("/profile", authenticateToken, profileLimiter, async (req, res) => {
 });
 
 // Update profile
-router.put("/profile", authenticateToken, profileLimiter, async (req, res) => {
-  try {
-    const { name, email, phone, location, services, experience } = req.body;
+router.put(
+  "/profile",
+  authenticateToken,
+  upload.single("profilePhoto"),
+  async (req, res) => {
+    try {
+      const userId = req.user.id;
+      const role = req.user.role;
 
-    // Input validation
-    if (!name?.trim()) {
-      return res.status(400).json({
-        error: "Name is required",
-        code: "MISSING_NAME",
-      });
-    }
+      const { name, email, location, phone, services } = req.body;
+      const profilePhoto = req.file
+        ? `/Uploads/profiles/${req.file.filename}`
+        : undefined;
 
-    const cleanData = {
-      name: DOMPurify.sanitize(name.trim()),
-      email: email ? DOMPurify.sanitize(email.trim()) : null,
-      phone: phone ? DOMPurify.sanitize(phone.trim()) : null,
-    };
+      // Sanitize phone and location
+      const sanitizedPhone = phone && DOMPurify.sanitize(phone.trim());
+      const sanitizedLocation = location && DOMPurify.sanitize(location.trim());
 
-    const updatedUser = await prisma.$transaction(async (tx) => {
-      const user = await tx.user.update({
-        where: { id: req.user.id },
-        data: cleanData,
-        select: { id: true, name: true, email: true, phone: true, role: true },
-      });
-
-      if (["seller", "both"].includes(req.user.role)) {
-        await tx.sellerProfile.upsert({
-          where: { userId: req.user.id },
-          update: {
-            location: DOMPurify.sanitize(location?.trim() || ""),
-            services: Array.isArray(services) ? services : [],
-            experience: parseInt(experience) || 0,
-            isComplete: true,
+      // Check for phone number uniqueness
+      if (sanitizedPhone) {
+        const existingUser = await prisma.user.findFirst({
+          where: {
+            phone: sanitizedPhone,
+            id: { not: userId }, // exclude current user
           },
-          create: {
-            userId: req.user.id,
-            name: cleanData.name,
-            phone: cleanData.phone,
-            location: DOMPurify.sanitize(location?.trim() || ""),
-            services: Array.isArray(services) ? services : [],
-            experience: parseInt(experience) || 0,
-            isComplete: true,
+        });
+
+        if (existingUser) {
+          if (req.file) fs.unlink(req.file.path, () => {});
+          return res.status(400).json({
+            message: "Phone number already in use by another account.",
+          });
+        }
+      }
+
+      // Prepare update data
+      const updateData = {
+        name,
+        email,
+      };
+      if (sanitizedPhone) updateData.phone = sanitizedPhone;
+      if (sanitizedLocation) updateData.location = sanitizedLocation;
+
+      const updatedUser = await prisma.user.update({
+        where: { id: userId },
+        data: updateData,
+        select: {
+          id: true,
+          email: true,
+          phone: true,
+          location: true,
+          role: true,
+          name: true,
+          sellerProfile: {
+            select: {
+              location: true,
+              gender: true,
+              phone: true,
+              profilePhoto: true,
+              services: true,
+              experience: true,
+              isComplete: true,
+            },
+          },
+        },
+      });
+
+      // Seller-specific profile update
+      if (role === "SELLER" || role === "BOTH") {
+        const sellerUpdateData = {};
+
+        if (sanitizedLocation) sellerUpdateData.location = sanitizedLocation;
+        if (sanitizedPhone) sellerUpdateData.phone = sanitizedPhone;
+        if (services) {
+          sellerUpdateData.services =
+            typeof services === "string"
+              ? services
+                  .split(",")
+                  .map((s) => s.trim())
+                  .filter(Boolean)
+              : services;
+        }
+        if (profilePhoto) {
+          sellerUpdateData.profilePhoto = profilePhoto;
+        }
+
+        const updatedSellerProfile = await prisma.sellerProfile.update({
+          where: { userId },
+          data: sellerUpdateData,
+        });
+
+        return res.json({
+          message: "Profile updated successfully",
+          user: {
+            ...updatedUser,
+            sellerProfile: updatedSellerProfile,
+            profileComplete: !!updatedSellerProfile?.isComplete,
           },
         });
       }
 
-      return user;
-    });
-
-    res.json({
-      success: true,
-      message: "Profile updated successfully",
-      user: updatedUser,
-    });
-  } catch (error) {
-    console.error("Profile update error:", error);
-
-    if (error.code === "P2002") {
-      return res.status(400).json({
-        error: "Email or phone already in use",
-        code: "DUPLICATE_ENTRY",
+      // Buyer-only user response
+      return res.json({
+        message: "Profile updated successfully",
+        user: {
+          ...updatedUser,
+          profileComplete: !!updatedUser.sellerProfile?.isComplete,
+        },
+      });
+    } catch (error) {
+      console.error("Profile update error:", error);
+      if (req.file) fs.unlink(req.file.path, () => {});
+      return res.status(500).json({
+        message: "Failed to update profile",
+        error: error.message,
       });
     }
-
-    res.status(500).json({
-      error: "Profile update failed",
-      code: "PROFILE_UPDATE_FAILED",
-    });
   }
-});
+);
 
 // Become a seller
 router.post(
@@ -232,6 +283,7 @@ router.post(
             id: true,
             email: true,
             phone: true,
+            location: true, // Added to return user.location
             role: true,
             name: true,
           },

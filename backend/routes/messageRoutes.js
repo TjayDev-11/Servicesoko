@@ -5,7 +5,7 @@ import { JSDOM } from "jsdom";
 import createDOMPurify from "dompurify";
 import rateLimit from "express-rate-limit";
 import { body, param, validationResult } from "express-validator";
-import { notifyMessageReceived } from "../utils/notify.js"; // Import notification utility
+import { notifyMessageReceived } from "../utils/notify.js";
 
 const { window } = new JSDOM("");
 const DOMPurify = createDOMPurify(window);
@@ -66,7 +66,7 @@ router.post(
       // Verify receiver exists
       const receiver = await prisma.user.findUnique({
         where: { id: receiverId },
-        select: { id: true, role: true, name: true, email: true }, // Added email for notification
+        select: { id: true, role: true, name: true, email: true },
       });
 
       if (!receiver) {
@@ -98,7 +98,7 @@ router.post(
           createdAt: true,
           isRead: true,
           sender: { select: { id: true, name: true } },
-          receiver: { select: { id: true, name: true, email: true } }, // Added email
+          receiver: { select: { id: true, name: true, email: true } },
         },
       });
 
@@ -226,36 +226,68 @@ router.get(
 // Get conversations
 router.get("/conversations", authenticateToken, async (req, res) => {
   try {
-    const conversations = await prisma.$queryRaw`
-      SELECT DISTINCT ON (u.id)
-        u.id,
-        u.name,
-        (SELECT COUNT(*) FROM "Message" m 
-         WHERE m."senderId" = u.id AND m."receiverId" = ${req.user.id} AND m."isRead" = false) as "unreadCount"
-      FROM "User" u
-      JOIN "Message" m ON (m."senderId" = u.id OR m."receiverId" = u.id)
-      WHERE (m."senderId" = ${req.user.id} OR m."receiverId" = ${req.user.id})
-      AND u.id != ${req.user.id}
-      ORDER BY u.id, m."createdAt" DESC
-    `;
+    const { limit = 5 } = req.query;
+
+    const messages = await prisma.message.findMany({
+      where: {
+        OR: [{ senderId: req.user.id }, { receiverId: req.user.id }],
+      },
+      select: {
+        senderId: true,
+        receiverId: true,
+        sender: { select: { id: true, name: true } },
+        receiver: { select: { id: true, name: true } },
+        isRead: true,
+        createdAt: true,
+      },
+      orderBy: { createdAt: "desc" },
+      distinct: ["senderId", "receiverId"],
+      take: parseInt(limit),
+    });
+
+    const conversations = [];
+    const seenPairs = new Set();
+
+    for (const msg of messages) {
+      const otherUserId =
+        msg.senderId === req.user.id ? msg.receiverId : msg.senderId;
+      const pairKey = [req.user.id, otherUserId].sort().join("-");
+
+      if (!seenPairs.has(pairKey)) {
+        seenPairs.add(pairKey);
+        const unreadCount = await prisma.message.count({
+          where: {
+            senderId: otherUserId,
+            receiverId: req.user.id,
+            isRead: false,
+          },
+        });
+        conversations.push({
+          id: otherUserId,
+          name: DOMPurify.sanitize(
+            msg.senderId === req.user.id ? msg.receiver.name : msg.sender.name
+          ),
+          unreadCount,
+        });
+      }
+    }
 
     res.json({
       success: true,
-      conversations: conversations.map((c) => ({
-        id: c.id,
-        name: DOMPurify.sanitize(c.name),
-        unreadCount: parseInt(c.unreadCount) || 0,
-      })),
+      conversations,
     });
   } catch (error) {
     console.error("Get conversations error:", {
       message: error.message,
       stack: error.stack,
       userId: req.user.id,
+      prismaCode: error.code || "N/A",
     });
     res.status(500).json({
       error: "Failed to fetch conversations",
       code: "CONVERSATIONS_FAILED",
+      details:
+        process.env.NODE_ENV === "development" ? error.message : undefined,
     });
   }
 });

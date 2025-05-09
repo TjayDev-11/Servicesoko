@@ -5,7 +5,6 @@ import jwt from "jsonwebtoken";
 import "dotenv/config";
 import nodemailer from "nodemailer";
 import path from "path";
-
 import { fileURLToPath } from "url";
 import fs from "fs";
 import authenticateToken from "../middleware/authMiddleware.js";
@@ -205,8 +204,10 @@ router.post("/signup", async (req, res) => {
 
 router.post("/login", loginLimiter, async (req, res) => {
   const { identifier, password, rememberMe } = req.body;
+  console.log("Login attempt for identifier:", identifier);
   try {
     if (!identifier || !password) {
+      console.log("Missing identifier or password");
       return res
         .status(400)
         .json({ error: "Email/phone and password are required" });
@@ -219,15 +220,18 @@ router.post("/login", loginLimiter, async (req, res) => {
     });
 
     if (!user) {
+      console.log("User not found for identifier:", identifier);
       return res.status(400).json({ error: "User not found!" });
     }
 
     if (!user.password) {
+      console.log("Account uses social login for user:", user.id);
       return res.status(400).json({ error: "This account uses social login" });
     }
 
     const passwordMatch = await bcrypt.compare(password, user.password);
     if (!passwordMatch) {
+      console.log("Incorrect password for user:", user.id);
       return res.status(400).json({ error: "Wrong password!" });
     }
 
@@ -238,9 +242,10 @@ router.post("/login", loginLimiter, async (req, res) => {
         phone: user.phone,
         role: user.role,
         name: user.name,
+        isSeller: user.isSeller || false,
       },
       JWT_SECRET,
-      { expiresIn: rememberMe ? "7d" : "15m" } // Extend expiry if rememberMe
+      { expiresIn: rememberMe ? "7d" : "15m" }
     );
 
     const refreshToken = jwt.sign(
@@ -249,6 +254,7 @@ router.post("/login", loginLimiter, async (req, res) => {
       { expiresIn: "7d" }
     );
 
+    console.log("Login successful for user:", user.id, "Returning tokens");
     res.json({
       message: "Login successful!",
       accessToken,
@@ -278,19 +284,41 @@ router.post("/refresh", async (req, res) => {
   const { refreshToken } = req.body;
 
   if (!refreshToken) {
-    return res.status(401).json({ error: "No refresh token provided" });
+    console.error("No refresh token provided in /auth/refresh");
+    return res.status(401).json({
+      error: "No refresh token provided",
+      code: "MISSING_REFRESH_TOKEN",
+    });
   }
 
   try {
-    console.log("REFRESH_SECRET:", process.env.JWT_SECRET);
+    console.log("Attempting to verify refresh token");
     const payload = jwt.verify(refreshToken, JWT_SECRET);
+    if (!payload.id) {
+      console.error("Refresh token payload missing id", { payload });
+      return res.status(401).json({
+        error: "Invalid refresh token",
+        code: "INVALID_REFRESH_TOKEN",
+      });
+    }
+
     const user = await prisma.user.findUnique({
       where: { id: payload.id },
-      select: { id: true, role: true, email: true, phone: true, name: true },
+      select: {
+        id: true,
+        role: true,
+        email: true,
+        phone: true,
+        name: true,
+      },
     });
 
     if (!user) {
-      return res.status(403).json({ error: "User not found" });
+      console.error("User not found for refresh token", { userId: payload.id });
+      return res.status(403).json({
+        error: "User not found",
+        code: "USER_NOT_FOUND",
+      });
     }
 
     const newAccessToken = jwt.sign(
@@ -305,14 +333,29 @@ router.post("/refresh", async (req, res) => {
       { expiresIn: "15m" }
     );
 
+    console.log("Refresh token successful", { userId: user.id });
     res.json({ accessToken: newAccessToken });
-  } catch (err) {
-    console.error("Refresh error:", {
-      message: err.message,
-      stack: err.stack,
+  } catch (error) {
+    console.error("Refresh token error:", {
+      message: error.message,
+      stack: error.stack,
       token: refreshToken.substring(0, 10) + "...",
     });
-    res.status(401).json({ error: "Invalid refresh token" });
+    const response = {
+      error: "Invalid or expired refresh token",
+      code: "INVALID_REFRESH_TOKEN",
+      details:
+        process.env.NODE_ENV === "development" ? error.message : undefined,
+    };
+
+    if (error.name === "TokenExpiredError") {
+      response.code = "REFRESH_TOKEN_EXPIRED";
+      response.message = "Refresh token expired";
+    } else if (error.name === "JsonWebTokenError") {
+      response.message = "Invalid refresh token";
+    }
+
+    return res.status(401).json(response);
   }
 });
 
@@ -321,11 +364,27 @@ router.get("/validate-token", async (req, res) => {
   const token = authHeader && authHeader.split(" ")[1];
 
   if (!token) {
-    return res.status(401).json({ error: "No token provided", valid: false });
+    console.error("No token provided in /auth/validate-token");
+    return res.status(401).json({
+      error: "No token provided",
+      code: "MISSING_TOKEN",
+      valid: false,
+    });
   }
 
   try {
     const decoded = jwt.verify(token, JWT_SECRET);
+    if (!decoded.id) {
+      console.error("Token payload missing id in /auth/validate-token", {
+        decoded,
+      });
+      return res.status(401).json({
+        error: "Invalid token",
+        code: "INVALID_TOKEN_PAYLOAD",
+        valid: false,
+      });
+    }
+
     const user = await prisma.user.findUnique({
       where: { id: decoded.id },
       select: {
@@ -338,11 +397,17 @@ router.get("/validate-token", async (req, res) => {
     });
 
     if (!user) {
-      return res
-        .status(403)
-        .json({ error: "User no longer exists", valid: false });
+      console.error("User not found in /auth/validate-token", {
+        userId: decoded.id,
+      });
+      return res.status(403).json({
+        error: "User no longer exists",
+        code: "USER_NOT_FOUND",
+        valid: false,
+      });
     }
 
+    console.log("Token validation successful", { userId: user.id });
     res.json({
       valid: true,
       user: {
@@ -353,16 +418,28 @@ router.get("/validate-token", async (req, res) => {
         name: user.name,
       },
     });
-  } catch (err) {
+  } catch (error) {
     console.error("Validate token error:", {
-      message: err.message,
-      stack: err.stack,
+      message: error.message,
+      stack: error.stack,
+      token: token.substring(0, 10) + "...",
     });
-    res.status(403).json({
+    const response = {
       error: "Invalid or expired token",
+      code: "INVALID_TOKEN",
       valid: false,
-      details: process.env.NODE_ENV === "development" ? err.message : undefined,
-    });
+      details:
+        process.env.NODE_ENV === "development" ? error.message : undefined,
+    };
+
+    if (error.name === "TokenExpiredError") {
+      response.code = "TOKEN_EXPIRED";
+      response.message = "Token expired";
+    } else if (error.name === "JsonWebTokenError") {
+      response.message = "Invalid token";
+    }
+
+    return res.status(403).json(response);
   }
 });
 
@@ -407,7 +484,7 @@ router.post("/forgot-password", async (req, res) => {
             <h2>Password Reset</h2>
             <p>Click below to reset your password:</p>
             <a href="${resetUrl}" 
-               style="background: #1976d2; color: white; padding: "10px 15px; text-decoration: none; border-radius: 4px;">
+               style="background: #1976d2; color: white; padding: 10px 15px; text-decoration: none; border-radius: 4px;">
               Reset Password
             </a>
             <p>Link expires in 1 hour.</p>
