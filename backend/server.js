@@ -26,7 +26,7 @@ const prisma = new PrismaClient();
 app.use(helmet());
 app.use(
   cors({
-    origin: process.env.CORS_ORIGIN || "http://localhost:5173",
+    origin: "http://localhost:5173" || process.env.CORS_ORIGIN,
     credentials: true,
     optionsSuccessStatus: 200,
   })
@@ -51,6 +51,8 @@ app.use(express.urlencoded({ extended: true, limit: "10kb" }));
 app.use(passport.initialize());
 
 // Static Files
+app.use("/Uploads", cors(), express.static(path.join(__dirname, "Uploads")));
+
 app.use("/Uploads", express.static(path.join(__dirname, "Uploads")));
 
 // API Routes

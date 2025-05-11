@@ -39,56 +39,27 @@ function AuthCallback() {
   }, [navigate, setToken, location.search]);
 
   return (
-    <div
-      style={{
-        minHeight: "100vh",
-        display: "flex",
-        justifyContent: "center",
-        alignItems: "center",
-        background: "linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%)",
-        padding: "20px",
-      }}
-    >
-      <div
-        style={{
-          padding: "48px",
-          backgroundColor: "white",
-          borderRadius: "16px",
-          boxShadow: "0 8px 32px rgba(0,0,0,0.1)",
-          maxWidth: "480px",
-          width: "100%",
-          textAlign: "center",
-        }}
-      >
+    <div className="min-h-screen bg-gradient-to-br from-gray-100 to-gray-300 flex items-center justify-center p-4 font-inter">
+      <div className="bg-white p-8 rounded-lg shadow-xl max-w-md w-full text-center">
         {success && (
           <div
-            style={{
-              backgroundColor: "#e8f5e9",
-              color: "#2e7d32",
-              padding: "12px 16px",
-              borderRadius: "8px",
-              marginBottom: "24px",
-              fontSize: "14px",
-            }}
+            className="bg-green-100 text-green-700 p-3 rounded-md mb-4 text-sm"
+            role="alert"
+            aria-live="polite"
           >
             {success}
           </div>
         )}
         {error && (
           <div
-            style={{
-              backgroundColor: "#ffebee",
-              color: "#c62828",
-              padding: "12px 16px",
-              borderRadius: "8px",
-              marginBottom: "24px",
-              fontSize: "14px",
-            }}
+            className="bg-red-100 text-red-700 p-3 rounded-md mb-4 text-sm"
+            role="alert"
+            aria-live="polite"
           >
             {error}
           </div>
         )}
-        <p style={{ color: "#666", fontSize: "16px" }}>
+        <p className="text-gray-600 text-base">
           {success
             ? "Authenticating..."
             : error

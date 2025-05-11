@@ -1,7 +1,14 @@
 import { create } from "zustand";
 import { jwtDecode } from "jwt-decode";
-import api from "./api";
+import axios from "axios";
 
+const api = axios.create({ baseURL: import.meta.env.VITE_API_URL });
+
+const cache = {
+  services: { data: null, timestamp: null, ttl: 5 * 60 * 1000 },
+  userServices: { data: null, timestamp: null, ttl: 5 * 60 * 1000 },
+};
+let lastRefreshTime = 0;
 const useStore = create((set) => ({
   token: localStorage.getItem("authToken") || null,
   user: null,
@@ -13,6 +20,10 @@ const useStore = create((set) => ({
   conversations: [],
   unreadMessagesCount: 0,
   isLoading: false,
+  servicesLoading: false,
+  userServicesLoading: false,
+  ordersLoading: false,
+  sellerOrdersLoading: false,
   bootstrapped: false,
 
   setBootstrapped: (value) => {
@@ -38,6 +49,8 @@ const useStore = create((set) => ({
     console.log("Clearing store state");
     localStorage.removeItem("authToken");
     localStorage.removeItem("refreshToken");
+    cache.services = { data: null, timestamp: null, ttl: cache.services.ttl };
+    cache.userServices = { data: null, timestamp: null, ttl: cache.userServices.ttl };
     set({
       token: null,
       user: null,
@@ -53,6 +66,36 @@ const useStore = create((set) => ({
 
   setLoading: (isLoading) => set({ isLoading }),
 
+  refreshToken: async () => {
+    const refreshToken = localStorage.getItem("refreshToken");
+    if (!refreshToken) {
+      console.log("No refresh token available");
+      return false;
+    }
+    try {
+      console.log("Attempting to refresh token");
+      const response = await api.post("/auth/refresh", { refreshToken });
+      const { accessToken, refreshToken: newRefreshToken } = response.data;
+      const user = await useStore.getState().validateToken(accessToken);
+      if (user) {
+        useStore
+          .getState()
+          .setToken(accessToken, user, newRefreshToken || refreshToken);
+        console.log("Token refreshed successfully");
+        return true;
+      }
+      console.log("Token refresh failed: no user data");
+      return false;
+    } catch (error) {
+      console.error("Token refresh error:", {
+        message: error.message,
+        status: error.response?.status,
+        data: error.response?.data,
+      });
+      return false;
+    }
+  },
+
   isTokenValid: async () => {
     const token = localStorage.getItem("authToken");
     if (!token) {
@@ -63,9 +106,15 @@ const useStore = create((set) => ({
     try {
       const decoded = jwtDecode(token);
       if (decoded.exp < Date.now() / 1000) {
-        console.log("Token expired, relying on api.js interceptor for refresh");
-        set({ isAuthenticated: false });
-        return false;
+        console.log("Token expired, attempting to refresh");
+        const refreshed = await useStore.getState().refreshToken();
+        if (!refreshed) {
+          console.log("Token refresh failed, clearing auth state");
+          useStore.getState().clear();
+          window.location.href = "/login";
+          return false;
+        }
+        return true;
       }
       console.log("Token not expired, validating with server");
       const user = await useStore.getState().validateToken();
@@ -79,12 +128,13 @@ const useStore = create((set) => ({
         status: error.response?.status,
       });
       set({ isAuthenticated: false });
+      useStore.getState().clear();
+      window.location.href = "/login";
       return false;
     }
   },
 
-  validateToken: async () => {
-    const token = localStorage.getItem("authToken");
+  validateToken: async (token = localStorage.getItem("authToken")) => {
     if (!token) {
       console.log("No token provided for validateToken");
       set({ isAuthenticated: false });
@@ -92,7 +142,9 @@ const useStore = create((set) => ({
     }
     try {
       console.log("Validating token with /auth/validate-token");
-      const response = await api.get("/auth/validate-token");
+      const response = await api.get("/auth/validate-token", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
       console.log("Validate token response:", response.data);
       if (response.data.valid) {
         set({ user: response.data.user, isAuthenticated: true });
@@ -108,15 +160,14 @@ const useStore = create((set) => ({
         status: error.response?.status,
         data: error.response?.data,
       });
-      if (error.response?.status === 401) {
-        console.log("401 error, api.js interceptor should handle refresh");
-        set({ isAuthenticated: false });
-        return false;
-      } else if (error.response?.status === 403) {
-        console.log("403 error, treating as invalid token or permission issue");
-        set({ isAuthenticated: false });
-        localStorage.removeItem("authToken");
-        localStorage.removeItem("refreshToken");
+      if (error.response?.status === 403 || error.response?.status === 401) {
+        console.log("403/401 error, attempting token refresh");
+        const refreshed = await useStore.getState().refreshToken();
+        if (refreshed) {
+          return await useStore.getState().validateToken();
+        }
+        console.log("Token refresh failed, redirecting to login");
+        useStore.getState().clear();
         window.location.href = "/login";
         return false;
       }
@@ -127,28 +178,43 @@ const useStore = create((set) => ({
   },
 
   refreshUser: async () => {
+    const now = Date.now();
+    if (now - lastRefreshTime < 5000) {
+      return useStore.getState().user;
+    }
+    lastRefreshTime = now;
+
+    if (cache.profile.data && now - cache.profile.timestamp < cache.profile.ttl) {
+      set({ user: cache.profile.data });
+      return cache.profile.data;
+    }
+
     set({ isLoading: true });
     try {
-      console.log("Refreshing user profile");
-      const response = await api.get("/api/profile");
-      const updatedUser = response.data.user;
+      const response = await api.get("/api/profile", {
+        headers: { Authorization: `Bearer ${useStore.getState().token}` },
+      });
+      const updatedUser = response.data?.user || response.data;
+      
+      cache.profile = {
+        data: updatedUser,
+        timestamp: now,
+        ttl: 2 * 60 * 1000
+      };
 
       set({
         user: updatedUser,
         isLoading: false,
         isAuthenticated: true,
       });
-
-      console.log("User profile refreshed:", updatedUser);
       return updatedUser;
     } catch (error) {
-      console.error("Refresh user error:", {
-        message: error.message,
-        status: error.response?.status,
-      });
-
-      // If unauthorized, clear auth state
-      if (error.response?.status === 401) {
+      console.error("Refresh user error:", error);
+      if (error.response?.status === 401 || error.response?.status === 403) {
+        const refreshed = await useStore.getState().refreshToken();
+        if (refreshed) {
+          return await useStore.getState().refreshUser();
+        }
         set({
           isLoading: false,
           isAuthenticated: false,
@@ -157,78 +223,136 @@ const useStore = create((set) => ({
         });
         localStorage.removeItem("authToken");
         localStorage.removeItem("refreshToken");
+        window.location.href = "/login";
       } else {
         set({ isLoading: false });
       }
-
       throw error;
     }
   },
 
   fetchServices: async () => {
-    set({ isLoading: true });
+    if (
+      cache.services.data &&
+      cache.services.timestamp &&
+      Date.now() - cache.services.timestamp < cache.services.ttl
+    ) {
+      console.log("Using cached services");
+      set({ services: cache.services.data, servicesLoading: false });
+      return;
+    }
+    set({ servicesLoading: true });
     try {
-      const response = await api.get("/api/services");
-      set({ services: response.data.services, isLoading: false });
-    } catch (error) {
-      console.error("Fetch services error:", {
-        message: error.message,
-        status: error.response?.status,
+      const response = await api.get("/api/services", {
+        headers: { Authorization: `Bearer ${useStore.getState().token}` },
       });
-      set({ isLoading: false });
+      cache.services.data = response.data.services || [];
+      cache.services.timestamp = Date.now();
+      set({
+        services: response.data.services || [],
+        servicesLoading: false,
+      });
+    } catch (error) {
+      console.error("Fetch services error:", error);
+      set({
+        services: [],
+        servicesLoading: false,
+      });
       throw error;
     }
   },
 
   fetchUserServices: async () => {
-    set({ isLoading: true });
+    if (
+      cache.userServices.data &&
+      cache.userServices.timestamp &&
+      Date.now() - cache.userServices.timestamp < cache.userServices.ttl
+    ) {
+      console.log("Using cached userServices");
+      set({ userServices: cache.userServices.data, userServicesLoading: false });
+      return;
+    }
+    set({ userServicesLoading: true });
     try {
-      const response = await api.get("/api/services/user");
-      set({ userServices: response.data.services, isLoading: false });
+      const response = await api.get("/api/services/user", {
+        headers: { Authorization: `Bearer ${useStore.getState().token}` },
+      });
+      cache.userServices.data = response.data.services || [];
+      cache.userServices.timestamp = Date.now();
+      set({ userServices: response.data.services, userServicesLoading: false });
     } catch (error) {
       console.error("Fetch user services error:", {
         message: error.message,
         status: error.response?.status,
       });
-      set({ isLoading: false });
+      set({ userServicesLoading: false });
+      throw error;
+    }
+  },
+
+  deleteService: async (serviceId) => {
+    try {
+      console.log("Deleting service with ID:", serviceId);
+      const response = await api.delete(`/api/services/${serviceId}`, {
+        headers: { Authorization: `Bearer ${useStore.getState().token}` },
+      });
+      console.log("Service deleted successfully:", response.data);
+      cache.userServices.data = null;
+      set((state) => ({
+        userServices: state.userServices.filter(
+          (service) => service.id !== serviceId
+        ),
+      }));
+      return response.data;
+    } catch (error) {
+      console.error("Delete service error:", {
+        message: error.message,
+        status: error.response?.status,
+        data: error.response?.data,
+      });
       throw error;
     }
   },
 
   fetchOrders: async () => {
-    set({ isLoading: true });
+    set({ ordersLoading: true });
     try {
-      const response = await api.get("/api/orders?limit=5");
-      set({ orders: response.data.orders, isLoading: false });
+      const response = await api.get("/api/orders?limit=5", {
+        headers: { Authorization: `Bearer ${useStore.getState().token}` },
+      });
+      set({ orders: response.data.orders, ordersLoading: false });
     } catch (error) {
       console.error("Fetch orders error:", {
         message: error.message,
         status: error.response?.status,
       });
-      set({ isLoading: false });
+      set({ ordersLoading: false });
       throw error;
     }
   },
 
   fetchSellerOrders: async () => {
-    set({ isLoading: true });
+    set({ sellerOrdersLoading: true });
     try {
-      const response = await api.get("/api/seller-orders?limit=5");
-      set({ sellerOrders: response.data, isLoading: false });
+      const response = await api.get("/api/seller-orders?limit=5", {
+        headers: { Authorization: `Bearer ${useStore.getState().token}` },
+      });
+      set({ sellerOrders: response.data, sellerOrdersLoading: false });
     } catch (error) {
       console.error("Fetch seller orders error:", {
         message: error.message,
         status: error.response?.status,
       });
-      set({ isLoading: false });
+      set({ sellerOrdersLoading: false });
       throw error;
     }
   },
 
   fetchConversations: async () => {
-    set({ isLoading: true });
     try {
-      const response = await api.get("/api/conversations?limit=5");
+      const response = await api.get("/api/conversations?limit=5", {
+        headers: { Authorization: `Bearer ${useStore.getState().token}` },
+      });
       const conversations = Array.isArray(response.data.conversations)
         ? response.data.conversations
         : [];
@@ -239,14 +363,13 @@ const useStore = create((set) => ({
       set({
         conversations,
         unreadMessagesCount,
-        isLoading: false,
       });
     } catch (error) {
       console.error("Fetch conversations error:", {
         message: error.message,
         status: error.response?.status,
       });
-      set({ conversations: [], unreadMessagesCount: 0, isLoading: false });
+      set({ conversations: [], unreadMessagesCount: 0 });
       throw error;
     }
   },
@@ -269,7 +392,7 @@ const useStore = create((set) => ({
   },
 
   updateOrderStatusApi: async (orderId, status) => {
-    set({ isLoading: true });
+    set({ ordersLoading: true });
     try {
       let endpoint;
       switch (status.toUpperCase()) {
@@ -291,7 +414,13 @@ const useStore = create((set) => ({
       console.log(
         `Updating order ${orderId} to status ${status} via ${endpoint}`
       );
-      const response = await api.put(endpoint);
+      const response = await api.put(
+        endpoint,
+        {},
+        {
+          headers: { Authorization: `Bearer ${useStore.getState().token}` },
+        }
+      );
       console.log(`Order ${orderId} updated to ${status}:`, response.data);
       set((state) => ({
         orders: state.orders.map((order) =>
@@ -306,7 +435,7 @@ const useStore = create((set) => ({
             order.id === orderId ? { ...order, status } : order
           ),
         },
-        isLoading: false,
+        ordersLoading: false,
       }));
       return response.data;
     } catch (error) {
@@ -315,31 +444,68 @@ const useStore = create((set) => ({
         status: error.response?.status,
         data: error.response?.data,
       });
+      set({ ordersLoading: false });
+      throw error;
+    }
+  },
+
+  updateProfile: async (formData) => {
+    set({ isLoading: true });
+    try {
+      const response = await api.put("/api/profile", formData, {
+        headers: {
+          Authorization: `Bearer ${useStore.getState().token}`,
+          "Content-Type": "multipart/form-data",
+        },
+      });
+      
+      // Invalidate profile cache
+      cache.profile = { data: null, timestamp: null, ttl: cache.profile.ttl };
+      
+      const updatedUser = await useStore.getState().refreshUser();
+      set({ isLoading: false });
+      return updatedUser;
+    } catch (error) {
+      console.error("Profile update error:", error);
       set({ isLoading: false });
       throw error;
     }
   },
-  updateProfile: async (formData) => {
-    set({ isLoading: true });
+
+  addService: async (formData) => {
+    set({ userServicesLoading: true });
     try {
-      console.log("Updating profile with data:", formData);
-      const response = await api.put("/api/profile", formData, {
+      console.log("Adding service with data:", formData);
+      const response = await api.post("/api/services", formData, {
         headers: {
+          Authorization: `Bearer ${useStore.getState().token}`,
           "Content-Type": "multipart/form-data",
         },
       });
-
-      // Refresh user data after successful update
-      await useStore.getState().refreshUser();
-
-      set({ isLoading: false });
+      console.log("Service added successfully:", response.data);
+      cache.userServices.data = null;
+      set((state) => ({
+        userServices: [
+          ...state.userServices,
+          {
+            id: response.data.service.id,
+            title: response.data.service.title,
+            category: response.data.service.category,
+            description: response.data.serviceSeller.description,
+            price: response.data.serviceSeller.price,
+            experience: response.data.serviceSeller.experience,
+          },
+        ],
+        userServicesLoading: false,
+      }));
       return response.data;
     } catch (error) {
-      console.error("Profile update error:", {
+      console.error("Add service error:", {
         message: error.message,
         status: error.response?.status,
+        data: error.response?.data,
       });
-      set({ isLoading: false });
+      set({ userServicesLoading: false });
       throw error;
     }
   },

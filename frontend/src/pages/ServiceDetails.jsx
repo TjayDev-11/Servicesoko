@@ -1,53 +1,13 @@
+
 import { useParams, useNavigate } from "react-router-dom";
 import { useEffect, useState, useMemo, useCallback } from "react";
 import useStore from "../store";
 import axios from "axios";
-import {
-  FaStar,
-  FaRegStar,
-  FaArrowLeft,
-  FaSearch,
-  FaCheck,
-} from "react-icons/fa";
+import { FaStar, FaRegStar, FaArrowLeft, FaSearch, FaCheck } from "react-icons/fa";
 import { BsChatLeftText, BsArrowRight } from "react-icons/bs";
 import BookingModal from "../components/BookingModal";
 import ChatModal from "../components/ChatModal";
-
-// Service categories for Kenyan context
-const SERVICE_CATEGORIES = [
-  {
-    id: "plumbing",
-    name: "Plumbing",
-    image: "/images/plumbing.png",
-    description: "Reliable plumbing solutions",
-    icon: "🛠️",
-    popularServices: ["Leak repairs", "Pipe installation", "Drain cleaning"],
-  },
-  {
-    id: "electrical",
-    name: "Electrical",
-    image: "/images/electrical.png",
-    description: "Certified electrical services",
-    icon: "💡",
-    popularServices: ["Wiring", "Lighting installation", "Repairs"],
-  },
-  {
-    id: "cleaning",
-    name: "Cleaning",
-    image: "/images/cleaning.png",
-    description: "Professional cleaning services",
-    icon: "🧹",
-    popularServices: ["House cleaning", "Office cleaning", "Carpet cleaning"],
-  },
-  {
-    id: "moving",
-    name: "Moving",
-    image: "/images/movers.png",
-    description: "Efficient moving services",
-    icon: "🚚",
-    popularServices: ["Local moving", "Packing", "Furniture transport"],
-  },
-];
+import serviceCategories from "../data/services.js";
 
 function ServiceDetails() {
   const { category } = useParams();
@@ -61,41 +21,36 @@ function ServiceDetails() {
   const [showBookingModal, setShowBookingModal] = useState(false);
   const [selectedSeller, setSelectedSeller] = useState(null);
   const [bookingDate, setBookingDate] = useState("");
-  const [bookingStatus, setBookingStatus] = useState(null); // null, "pending", "success", "failed", "needsLogin"
+  const [bookingStatus, setBookingStatus] = useState(null);
   const navigate = useNavigate();
 
-  // Check if category is undefined or empty
   useEffect(() => {
-    if (!category || category.trim() === "") {
-      setError("No service category specified. Please select a category.");
+    if (!category) {
+      setError("No service category specified.");
       setLoading(false);
     }
   }, [category]);
 
   const categoryInfo = useMemo(
     () =>
-      SERVICE_CATEGORIES.find((cat) => cat.id === category) || {
+      serviceCategories.find((cat) => cat.id === category) || {
         name: "Service",
         description: "Professional services",
         image: "/images/default.png",
-        popularServices: [],
+        sampleServices: [],
       },
     [category]
   );
 
   const categoryServices = useMemo(() => {
     if (!category) return [];
-    const targetCategory = category.toLowerCase();
-    const filtered = services.filter(
-      (service) => service.category?.toLowerCase() === targetCategory
+    return services.filter(
+      (service) => service.category?.toLowerCase() === category.toLowerCase()
     );
-
-    console.log("Filtered categoryServices:", filtered);
-    return filtered;
   }, [services, category]);
 
   const allSellers = useMemo(() => {
-    const sellers = categoryServices.reduce((sellers, service) => {
+    return categoryServices.reduce((sellers, service) => {
       if (!service.sellers?.length) return sellers;
       return [
         ...sellers,
@@ -103,33 +58,32 @@ function ServiceDetails() {
           ...seller,
           serviceName: service.title,
           serviceId: service.id,
+          // Mock bio for now; replace with actual data from backend
+          bio:
+            seller.bio ||
+            `Specializing in ${service.title.toLowerCase()} with years of experience.`,
         })),
       ];
     }, []);
-    console.log("All sellers:", sellers); // Debug log
-    return sellers;
   }, [categoryServices]);
 
   const filteredSellers = useMemo(() => {
-    const filtered = allSellers.filter(
+    return allSellers.filter(
       (seller) =>
         seller.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         seller.serviceName.toLowerCase().includes(searchTerm.toLowerCase())
     );
-    console.log("Filtered sellers:", filtered); // Debug log
-    return filtered;
   }, [allSellers, searchTerm]);
 
   useEffect(() => {
     const fetchData = async () => {
-      if (!category || category.trim() === "") return;
-
+      if (!category) return;
       try {
         setLoading(true);
         setError(null);
         await fetchServices(token);
       } catch (error) {
-        setError("Failed to load services. Please try again later.");
+        setError("Failed to load services.");
         console.error("Error fetching services:", error);
       } finally {
         setLoading(false);
@@ -142,8 +96,8 @@ function ServiceDetails() {
     setSelectedSeller(sellerId);
     setShowBookingModal(true);
     setBookingStatus(null);
-    setBookingDate(new Date().toISOString().split("T")[0]); // Default to today
-    setError(null); // Reset error when opening modal
+    setBookingDate(new Date().toISOString().split("T")[0]);
+    setError(null);
   }, []);
 
   const handleBooking = useCallback(async () => {
@@ -154,78 +108,50 @@ function ServiceDetails() {
 
     const seller = allSellers.find((s) => s.id === selectedSeller);
     if (!seller || !bookingDate) {
-      setError("Please select a professional and booking date");
+      setError("Select a professional and date.");
       setBookingStatus("failed");
       return;
     }
 
-    // Validate data before sending
-    const serviceId = seller.serviceId; // Keep as string
-    const sellerId = seller.id; // Keep as string
+    const serviceId = seller.serviceId;
+    const sellerId = seller.id;
     const dateObj = new Date(bookingDate);
 
-    // Validate inputs
     if (!serviceId || typeof serviceId !== "string") {
-      console.error("Invalid serviceId:", serviceId);
+      setError("Invalid service ID.");
       setBookingStatus("failed");
-      setError("Invalid service ID. Please try another service.");
       return;
     }
     if (!sellerId || typeof sellerId !== "string") {
-      console.error("Invalid sellerId:", sellerId);
+      setError("Invalid seller ID.");
       setBookingStatus("failed");
-      setError("Invalid seller ID. Please try another professional.");
       return;
     }
-    if (isNaN(dateObj.getTime())) {
-      console.error("Invalid bookingDate:", bookingDate);
+    if (isNaN(dateObj.getTime()) || dateObj < new Date().setHours(0, 0, 0, 0)) {
+      setError("Invalid or past booking date.");
       setBookingStatus("failed");
-      setError("Invalid booking date. Please select a valid date.");
-      return;
-    }
-
-    // Ensure booking date is not in the past
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    if (dateObj < today) {
-      console.error("Booking date in the past:", bookingDate);
-      setBookingStatus("failed");
-      setError("Booking date cannot be in the past.");
       return;
     }
 
     setBookingStatus("pending");
 
     try {
-      const bookingData = {
-        serviceId,
-        sellerId,
-        bookingDate: dateObj.toISOString().split("T")[0], // YYYY-MM-DD format
-      };
-
-      console.log("Final booking data:", bookingData);
-
       const response = await axios.post(
         `${import.meta.env.VITE_API_URL}/api/orders`,
-        bookingData,
+        {
+          serviceId,
+          sellerId,
+          bookingDate: dateObj.toISOString().split("T")[0],
+        },
         { headers: { Authorization: `Bearer ${token}` } }
       );
 
-      // Update expected response check based on orderRoutes.js
       if (response.data.message !== "Order placed successfully") {
         throw new Error(response.data.error || "Failed to create order");
       }
 
-      const paymentResponse = await simulateMpesaPayment(
-        seller.price,
-        user.phone
-      );
+      const paymentResponse = await simulateMpesaPayment(seller.price, user.phone);
       if (!paymentResponse.success) throw new Error("Payment failed");
-
-      // Notifications are now handled by the backend, but confirm order details
-      console.log(
-        `Order confirmed: ${response.data.order.id} for ${seller.serviceName} on ${bookingDate}`
-      );
 
       setBookingStatus("success");
       setTimeout(() => {
@@ -233,33 +159,14 @@ function ServiceDetails() {
         navigate("/dashboard");
       }, 2000);
     } catch (error) {
-      console.error("Booking error:", {
-        message: error.message,
-        response: error.response?.data,
-        status: error.response?.status,
-        config: error.config,
-      });
+      setError(error.response?.data?.error || "Failed to book service.");
       setBookingStatus("failed");
-      setError(
-        error.response?.data?.error ||
-          error.message ||
-          "Failed to book service. Please try again."
-      );
     }
   }, [selectedSeller, allSellers, token, bookingDate, user, navigate]);
 
-  const simulateMpesaPayment = async (amount, phoneNumber) => {
-    console.log(
-      `Initiating M-Pesa payment of KSh ${amount} to ${
-        phoneNumber || "fallback"
-      }`
-    );
-    // Temporarily bypass phoneNumber check for testing
-    // if (!phoneNumber) throw new Error("Phone number required for payment");
+  const simulateMpesaPayment = async (amount) => {
     return new Promise((resolve) => {
-      setTimeout(() => {
-        resolve({ success: true, transactionId: "MPESA123456" });
-      }, 2000);
+      setTimeout(() => resolve({ success: true, transactionId: "MPESA123456" }), 2000);
     });
   };
 
@@ -269,9 +176,7 @@ function ServiceDetails() {
       try {
         const response = await axios.get(
           `${import.meta.env.VITE_API_URL}/api/messages/${sellerId}`,
-          {
-            headers: { Authorization: `Bearer ${token}` },
-          }
+          { headers: { Authorization: `Bearer ${token}` } }
         );
         setMessages(response.data.messages || []);
       } catch (error) {
@@ -300,69 +205,68 @@ function ServiceDetails() {
     return Array(5)
       .fill(0)
       .map((_, i) => (
-        <span
-          key={i}
-          style={{
-            color: i < rating ? "#FFD700" : "#E0E0E0",
-            fontSize: "16px",
-            marginRight: "2px",
-          }}
-        >
+        <span key={i} className={i < rating ? "text-yellow-400" : "text-gray-300"}>
           {i < rating ? <FaStar /> : <FaRegStar />}
         </span>
       ));
   }, []);
 
   return (
-    <div className="service-details">
+    <div className="font-inter text-gray-900 min-h-screen">
       <div
-        className="hero"
+        className="bg-cover bg-center text-white py-20 px-4"
         style={{
           backgroundImage: `linear-gradient(rgba(0, 0, 0, 0.6), rgba(0, 0, 0, 0.6)), url(${categoryInfo.image})`,
         }}
       >
-        <div className="container">
-          <button onClick={() => navigate(-1)} className="back-btn">
+        <div className="max-w-5xl mx-auto">
+          <button
+            onClick={() => navigate(-1)}
+            className="flex items-center gap-2 bg-white/15 text-white px-4 py-2 rounded-full text-sm font-medium hover:bg-white/25 transition-colors"
+          >
             <FaArrowLeft /> Back
           </button>
-          <div className="hero-content">
-            <h1>{categoryInfo.name}</h1>
-            <p>{categoryInfo.description}</p>
+          <div className="mt-8">
+            <h1 className="text-4xl font-bold mb-3">{categoryInfo.name}</h1>
+            <p className="text-lg opacity-85">{categoryInfo.description}</p>
           </div>
         </div>
       </div>
 
-      <div className="main-content container">
-        <div className="search-bar">
-          <FaSearch />
+      <div className="max-w-5xl mx-auto -mt-20 bg-white rounded-2xl shadow-lg p-6 mb-10">
+        <div className="relative mb-6">
+          <FaSearch className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500" />
           <input
             type="text"
             placeholder="Search professionals..."
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
+            className="w-full pl-10 pr-4 py-3 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-cyan-400"
           />
         </div>
 
-        <div className="popular-services">
-          <h3>Popular Services</h3>
-          <div className="services-grid">
-            {categoryInfo.popularServices.map((service, index) => (
-              <div key={index} className="service-item">
-                <FaCheck /> {service}
+        <div className="mb-8">
+          <h3 className="text-xl font-semibold mb-4">Popular Services</h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+            {categoryInfo.sampleServices.map((service, index) => (
+              <div key={index} className="flex items-center gap-2 text-sm text-gray-600">
+                <FaCheck className="text-green-500" /> {service}
               </div>
             ))}
           </div>
         </div>
 
         {loading ? (
-          <div className="loading">Loading...</div>
+          <div className="text-center py-8 text-gray-500">Loading...</div>
         ) : error ? (
-          <div className="error">{error}</div>
+          <div className="text-center py-8 text-red-500">{error}</div>
         ) : filteredSellers.length > 0 ? (
-          <div className="professionals">
-            <h2>Professionals</h2>
-            <p>{filteredSellers.length} professionals available</p>
-            <div className="professionals-grid">
+          <div>
+            <h2 className="text-2xl font-semibold mb-2">Professionals</h2>
+            <p className="text-sm text-gray-500 mb-4">
+              {filteredSellers.length} professionals available
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {filteredSellers.map((seller) => (
                 <ProfessionalCard
                   key={seller.id}
@@ -375,7 +279,7 @@ function ServiceDetails() {
             </div>
           </div>
         ) : (
-          <div className="empty">No professionals found.</div>
+          <div className="text-center py-8 text-gray-500">No professionals found.</div>
         )}
       </div>
 
@@ -406,20 +310,15 @@ function ServiceDetails() {
   );
 }
 
-const ProfessionalCard = ({
-  seller,
-  onChat,
-  renderStars,
-  openBookingModal,
-}) => {
+const ProfessionalCard = ({ seller, onChat, renderStars, openBookingModal }) => {
   return (
-    <div className="pro-card">
-      <div className="card-content">
-        <div className="avatar">
+    <div className="border border-gray-200 rounded-xl p-4 hover:shadow-md transition-all">
+      <div className="flex gap-3 mb-3">
+        <div className="w-12 h-12 rounded-full overflow-hidden bg-gray-100 flex-shrink-0">
           {seller.image ? (
-            <img src={seller.image} alt={seller.name} />
+            <img src={seller.image} alt={seller.name} className="w-full h-full object-cover" />
           ) : (
-            <div className="initials">
+            <div className="flex items-center justify-center h-full text-gray-500 font-semibold text-sm">
               {seller.name
                 .split(" ")
                 .map((n) => n[0])
@@ -427,25 +326,29 @@ const ProfessionalCard = ({
             </div>
           )}
         </div>
-        <div className="info">
-          <h3>{seller.name}</h3>
-          <p className="service">{seller.serviceName}</p>
-          <div className="details">
-            <div className="rating">
-              {renderStars(seller.rating || 0)}
-              <span>{seller.rating?.toFixed(1) || "New"}</span>
-            </div>
+        <div className="flex-1">
+          <h3 className="text-base font-semibold mb-1">{seller.name}</h3>
+          <p className="text-xs text-gray-500 mb-2">{seller.serviceName}</p>
+          <p className="text-sm text-gray-600 mb-2 line-clamp-2">{seller.bio}</p>
+          <div className="flex items-center gap-2 mb-2">
+            <div className="flex">{renderStars(seller.rating || 0)}</div>
+            <span className="text-xs text-gray-500">
+              {seller.rating?.toFixed(1) || "New"}
+            </span>
           </div>
-          <div className="price">From KSh {seller.price}</div>
+          <div className="text-sm font-medium">From KSh {seller.price}</div>
         </div>
       </div>
-      <div className="card-actions">
-        <button onClick={() => onChat(seller.id)} className="btn chat-btn">
+      <div className="flex gap-2">
+        <button
+          onClick={() => onChat(seller.id)}
+          className="flex-1 flex items-center justify-center gap-2 py-2 px-4 bg-blue-500 text-white text-sm rounded-md hover:bg-blue-600 transition-colors"
+        >
           <BsChatLeftText /> Chat
         </button>
         <button
           onClick={() => openBookingModal(seller.id)}
-          className="btn book-btn"
+          className="flex-1 flex items-center justify-center gap-2 py-2 px-4 bg-blue-500 text-white text-sm rounded-md hover:bg-blue-600 transition-colors"
         >
           Book <BsArrowRight />
         </button>
@@ -455,268 +358,3 @@ const ProfessionalCard = ({
 };
 
 export default ServiceDetails;
-
-const styles = `
-  .service-details {
-    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-    color: #2D2D2D;
-    line-height: 1.5;
-  }
-
-  .container {
-    max-width: 1100px;
-    margin: 0 auto;
-    padding: 0 16px;
-  }
-
-  .hero {
-    background-size: cover;
-    background-position: center;
-    color: #FFFFFF;
-    padding: 80px 0 120px;
-  }
-
-  .back-btn {
-    background: rgba(255, 255, 255, 0.15);
-    border: none;
-    color: #FFFFFF;
-    padding: 8px 16px;
-    border-radius: 20px;
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    cursor: pointer;
-    font-size: 14px;
-    font-weight: 500;
-    transition: background 0.2s;
-  }
-
-  .back-btn:hover {
-    background: rgba(255, 255, 255, 0.25);
-  }
-
-  .hero-content {
-    margin-top: 32px;
-  }
-
-  .hero-content h1 {
-    font-size: 36px;
-    font-weight: 700;
-    margin-bottom: 12px;
-  }
-
-  .hero-content p {
-    font-size: 18px;
-    opacity: 0.85;
-  }
-
-  .main-content {
-    transform: translateY(-80px);
-    background: #FFFFFF;
-    border-radius: 16px;
-    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.08);
-    padding: 24px;
-    margin-bottom: 40px;
-  }
-
-  .search-bar {
-    position: relative;
-    margin-bottom: 24px;
-  }
-
-  .search-bar svg {
-    position: absolute;
-    left: 12px;
-    top: 50%;
-    transform: translateY(-50%);
-    color: #6B7280;
-  }
-
-  .search-bar input {
-    width: 100%;
-    padding: 12px 16px 12px 40px;
-    border: 1px solid #E5E7EB;
-    border-radius: 8px;
-    font-size: 14px;
-    outline: none;
-  }
-
-  .popular-services {
-    margin-bottom: 32px;
-  }
-
-  .popular-services h3 {
-    font-size: 20px;
-    font-weight: 600;
-    margin-bottom: 16px;
-  }
-
-  .services-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
-    gap: 12px;
-  }
-
-  .service-item {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    font-size: 14px;
-    color: #4B5563;
-  }
-
-  .service-item svg {
-    color: #10B981;
-  }
-
-  .professionals h2 {
-    font-size: 24px;
-    font-weight: 600;
-    margin-bottom: 8px;
-  }
-
-  .professionals p {
-    font-size: 14px;
-    color: #6B7280;
-    margin-bottom: 16px;
-  }
-
-  .professionals-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-    gap: 16px;
-  }
-
-  .pro-card {
-    border: 1px solid #E5E7EB;
-    border-radius: 12px;
-    padding: 16px;
-    transition: border 0.2s, box-shadow 0.2s;
-  }
-
-  .card-content {
-    display: flex;
-    gap: 12px;
-    margin-bottom: 12px;
-  }
-
-  .avatar {
-    width: 48px;
-    height: 48px;
-    border-radius: 50%;
-    overflow: hidden;
-    background: #F3F4F6;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-  }
-
-  .avatar img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-  }
-
-  .initials {
-    font-size: 16px;
-    font-weight: 600;
-    color: #6B7280;
-  }
-
-  .info {
-    flex: 1;
-  }
-
-  .info h3 {
-    font-size: 16px;
-    font-weight: 600;
-    margin: 0;
-    margin-bottom: 4px;
-  }
-
-  .service {
-    font-size: 13px;
-    color: #6B7280;
-    margin: 0;
-    margin-bottom: 8px;
-  }
-
-  .details {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    margin-bottom: 8px;
-  }
-
-  .rating {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-  }
-
-  .rating span {
-    font-size: 13px;
-    color: #6B7280;
-  }
-
-  .price {
-    font-size: 14px;
-    font-weight: 500;
-    color: #2D2D2D;
-  }
-
-  .card-actions {
-    display: flex;
-    gap: 8px;
-  }
-
-  .btn {
-    flex: 1;
-    padding: 10px;
-    border: none;
-    border-radius: 6px;
-    font-size: 14px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-    cursor: pointer;
-    transition: background 0.2s;
-  }
-
-  .chat-btn {
-    background: #3B82F6;
-    color: #FFFFFF;
-  }
-
-  .chat-btn:hover {
-    background: #2563EB;
-  }
-
-  .book-btn {
-    background: #3B82F6;
-    color: #FFFFFF;
-  }
-
-  .book-btn:hover {
-    background: #2563EB;
-  }
-
-  .loading,
-  .error,
-  .empty {
-    text-align: center;
-    padding: 32px;
-    color: #6B7280;
-    font-size: 16px;
-  }
-
-  .error {
-    color: #EF4444;
-  }
-`;
-
-const styleSheet = document.createElement("style");
-styleSheet.textContent = styles;
-document.head.appendChild(styleSheet);

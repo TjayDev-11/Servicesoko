@@ -389,12 +389,25 @@ router.get("/validate-token", async (req, res) => {
       where: { id: decoded.id },
       select: {
         id: true,
-        email: true,
-        phone: true,
-        role: true,
         name: true,
+        email: true,
+        phone:true,
+        role: true,
+        location: true,
+        sellerProfile: {
+          select: {
+            location: true,
+            serviceSellers: {
+              include: {
+                service: true, // ✅ this is key
+              },
+            },
+          },
+        },
       },
     });
+    
+    
 
     if (!user) {
       console.error("User not found in /auth/validate-token", {
@@ -410,13 +423,7 @@ router.get("/validate-token", async (req, res) => {
     console.log("Token validation successful", { userId: user.id });
     res.json({
       valid: true,
-      user: {
-        id: user.id,
-        email: user.email,
-        phone: user.phone,
-        role: user.role,
-        name: user.name,
-      },
+      user,
     });
   } catch (error) {
     console.error("Validate token error:", {

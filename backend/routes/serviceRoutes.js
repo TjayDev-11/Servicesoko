@@ -4,10 +4,12 @@ import authenticateToken from "../middleware/authMiddleware.js";
 import { JSDOM } from "jsdom";
 import createDOMPurify from "dompurify";
 import rateLimit from "express-rate-limit";
+import multer from "multer"; // Add multer
 import { notifyServiceAdded, notifyServiceAddedSMS } from "../utils/notify.js";
 
 const router = express.Router();
 const prisma = new PrismaClient();
+const upload = multer(); // Configure multer to parse form-data
 
 const { window } = new JSDOM("");
 const DOMPurify = createDOMPurify(window);
@@ -24,132 +26,12 @@ const serviceLimiter = rateLimit({
   },
 });
 
-// Get all services
-router.get("/services", async (req, res) => {
-  try {
-    const services = await prisma.service.findMany({
-      include: {
-        reviews: true,
-        serviceSellers: {
-          include: {
-            seller: {
-              include: {
-                sellerProfile: true,
-              },
-            },
-          },
-        },
-        category: true,
-      },
-    });
-
-    const servicesWithSellerRatings = services.map((service) => {
-      const sellers = service.serviceSellers.map((serviceSeller) => {
-        const seller = serviceSeller.seller;
-        const sellerReviews = service.reviews.filter(
-          (review) => review.sellerId === seller.id
-        );
-        const avgRating =
-          sellerReviews.length > 0
-            ? sellerReviews.reduce((sum, r) => sum + r.rating, 0) /
-              sellerReviews.length
-            : 0;
-
-        return {
-          id: seller.id,
-          name: seller.name,
-          rating: avgRating,
-          reviewsCount: sellerReviews.length,
-          location: seller.sellerProfile?.location || "Not specified",
-          phone: seller.sellerProfile?.phone || "Not provided",
-          description: serviceSeller.description || "No description provided",
-          price: serviceSeller.price || 0,
-          experience: serviceSeller.experience || null,
-        };
-      });
-
-      return {
-        id: service.id,
-        title: service.title,
-        category: service.category?.name || "uncategorized",
-        professionalCount: service.serviceSellers.length,
-        sellers,
-      };
-    });
-
-    res.json({
-      message: "Available services",
-      services: servicesWithSellerRatings,
-    });
-  } catch (error) {
-    console.error("Error fetching services:", error);
-    res.status(500).json({
-      error: "Failed to fetch services",
-      details:
-        process.env.NODE_ENV === "development" ? error.message : undefined,
-    });
-  }
-});
-
-// Get user-specific services
-router.get("/services/user", authenticateToken, async (req, res) => {
-  try {
-    const services = await prisma.service.findMany({
-      where: {
-        serviceSellers: {
-          some: {
-            sellerId: req.user.id,
-          },
-        },
-      },
-      include: {
-        category: true,
-        serviceSellers: {
-          where: {
-            sellerId: req.user.id,
-          },
-          include: {
-            seller: {
-              include: {
-                sellerProfile: true,
-              },
-            },
-          },
-        },
-      },
-    });
-
-    const userServices = services.map((service) => {
-      const serviceSeller = service.serviceSellers[0]; // Only the user's serviceSeller
-      return {
-        id: service.id,
-        title: service.title,
-        category: service.category?.name || "uncategorized",
-        description: serviceSeller.description || "No description provided",
-        price: serviceSeller.price || 0,
-        experience: serviceSeller.experience || null,
-      };
-    });
-
-    res.json({
-      message: "Your services",
-      services: userServices,
-    });
-  } catch (error) {
-    console.error("Error fetching user services:", error);
-    res.status(500).json({
-      error: "Failed to fetch your services",
-      details:
-        process.env.NODE_ENV === "development" ? error.message : undefined,
-    });
-  }
-});
-
 // Create a service
 router.post(
   "/services",
   authenticateToken,
   serviceLimiter,
+  upload.none(), // Parse form-data without files
   async (req, res) => {
     const { title, description, price, category, experience } = req.body;
 
@@ -251,7 +133,7 @@ router.post(
         return { service, serviceSeller, category: categoryRecord.name };
       });
 
-      // Send service added email notification
+      // Send notifications (unchanged)
       if (req.user.email) {
         console.log(
           `ServiceSoko: Attempting service added email notification for user ${req.user.id}, email: ${req.user.email}`
@@ -286,7 +168,6 @@ router.post(
         );
       }
 
-      // Send service added SMS notification
       if (req.user.phone) {
         console.log(
           `ServiceSoko: Attempting service added SMS notification for user ${req.user.id}, phone: ${req.user.phone}`
@@ -349,7 +230,126 @@ router.post(
   }
 );
 
-// Get sellers for a specific service
+// Other routes (unchanged)
+router.get("/services", async (req, res) => {
+  try {
+    const services = await prisma.service.findMany({
+      include: {
+        reviews: true,
+        serviceSellers: {
+          include: {
+            seller: {
+              include: {
+                sellerProfile: true,
+              },
+            },
+          },
+        },
+        category: true,
+      },
+    });
+
+    const servicesWithSellerRatings = services.map((service) => {
+      const sellers = service.serviceSellers.map((serviceSeller) => {
+        const seller = serviceSeller.seller;
+        const sellerReviews = service.reviews.filter(
+          (review) => review.sellerId === seller.id
+        );
+        const avgRating =
+          sellerReviews.length > 0
+            ? sellerReviews.reduce((sum, r) => sum + r.rating, 0) /
+              sellerReviews.length
+            : 0;
+
+        return {
+          id: seller.id,
+          name: seller.name,
+          rating: avgRating,
+          reviewsCount: sellerReviews.length,
+          location: seller.sellerProfile?.location || "Not specified",
+          phone: seller.sellerProfile?.phone || "Not provided",
+          description: serviceSeller.description || "No description provided",
+          price: serviceSeller.price || 0,
+          experience: serviceSeller.experience || null,
+        };
+      });
+
+      return {
+        id: service.id,
+        title: service.title,
+        category: service.category?.name || "uncategorized",
+        professionalCount: service.serviceSellers.length,
+        sellers,
+      };
+    });
+
+    res.json({
+      message: "Available services",
+      services: servicesWithSellerRatings,
+    });
+  } catch (error) {
+    console.error("Error fetching services:", error);
+    res.status(500).json({
+      error: "Failed to fetch services",
+      details:
+        process.env.NODE_ENV === "development" ? error.message : undefined,
+    });
+  }
+});
+
+router.get("/services/user", authenticateToken, async (req, res) => {
+  try {
+    const services = await prisma.service.findMany({
+      where: {
+        serviceSellers: {
+          some: {
+            sellerId: req.user.id,
+          },
+        },
+      },
+      include: {
+        category: true,
+        serviceSellers: {
+          where: {
+            sellerId: req.user.id,
+          },
+          include: {
+            seller: {
+              include: {
+                sellerProfile: true,
+              },
+            },
+          },
+        },
+      },
+    });
+
+    const userServices = services.map((service) => {
+      const serviceSeller = service.serviceSellers[0]; // Only the user's serviceSeller
+      return {
+        id: service.id,
+        title: service.title,
+        category: service.category?.name || "uncategorized",
+        description: serviceSeller.description || "No description provided",
+        price: serviceSeller.price || 0,
+        experience: serviceSeller.experience || null,
+      };
+    });
+
+    res.json({
+      message: "Your services",
+      services: userServices,
+    });
+  } catch (error) {
+    console.error("Error fetching user services:", error);
+    res.status(500).json({
+      error: "Failed to fetch your services",
+      details:
+        process.env.NODE_ENV === "development" ? error.message : undefined,
+    });
+  }
+});
+
 router.get("/services/:id/sellers", async (req, res) => {
   const { id } = req.params;
   try {
@@ -399,6 +399,68 @@ router.get("/services/:id/sellers", async (req, res) => {
     console.error("Error fetching sellers:", error);
     res.status(500).json({
       error: "Failed to fetch sellers",
+      details:
+        process.env.NODE_ENV === "development" ? error.message : undefined,
+    });
+  }
+});
+// Delete a service
+router.delete("/services/:id", authenticateToken, async (req, res) => {
+  const { id } = req.params;
+
+  try {
+    // Verify the service exists and belongs to the user
+    const serviceSeller = await prisma.serviceSeller.findFirst({
+      where: {
+        serviceId: id,
+        sellerId: req.user.id,
+      },
+    });
+
+    if (!serviceSeller) {
+      return res.status(404).json({
+        error: "Service not found or you do not have permission to delete it",
+      });
+    }
+
+    // Delete the serviceSeller record (service itself remains if other sellers offer it)
+    await prisma.serviceSeller.delete({
+      where: {
+        id: serviceSeller.id,
+      },
+    });
+
+    // Optionally, delete the service if no other sellers are associated
+    const remainingSellers = await prisma.serviceSeller.count({
+      where: { serviceId: id },
+    });
+
+    if (remainingSellers === 0) {
+      await prisma.service.delete({
+        where: { id },
+      });
+    }
+
+    // Update seller profile to remove the service from services array
+    const sellerProfile = await prisma.sellerProfile.findUnique({
+      where: { userId: req.user.id },
+    });
+
+    if (sellerProfile && sellerProfile.services) {
+      const updatedServices = sellerProfile.services.filter(
+        (serviceTitle) => serviceTitle !== serviceSeller.title
+      );
+      await prisma.sellerProfile.update({
+        where: { userId: req.user.id },
+        data: { services: updatedServices },
+      });
+    }
+
+    res.json({ message: "Service deleted successfully" });
+  } catch (error) {
+    console.error("Service deletion error:", error);
+    res.status(500).json({
+      error: "Failed to delete service",
       details:
         process.env.NODE_ENV === "development" ? error.message : undefined,
     });

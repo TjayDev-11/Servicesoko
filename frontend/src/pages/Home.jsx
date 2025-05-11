@@ -1,8 +1,8 @@
+
 import { Link } from "react-router-dom";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 
 function Home() {
-  // Array of background images for the hero section
   const heroBackgrounds = [
     "/images/gardening.png",
     "/images/plumbing.png",
@@ -11,884 +11,479 @@ function Home() {
   ];
 
   const [currentBgIndex, setCurrentBgIndex] = useState(0);
+  const [nextBgIndex, setNextBgIndex] = useState(1);
+  const [isFading, setIsFading] = useState(false);
+  const sectionRefs = useRef([]);
 
-  // Rotate background images every 5 seconds
+  // Preload images and rotate backgrounds
   useEffect(() => {
+    heroBackgrounds.forEach((img) => {
+      const image = new Image();
+      image.src = img;
+    });
+
     const interval = setInterval(() => {
-      setCurrentBgIndex((prevIndex) =>
-        prevIndex === heroBackgrounds.length - 1 ? 0 : prevIndex + 1
-      );
+      setIsFading(true);
+      setTimeout(() => {
+        setCurrentBgIndex((prevIndex) =>
+          prevIndex === heroBackgrounds.length - 1 ? 0 : prevIndex + 1
+        );
+        setNextBgIndex((prevIndex) =>
+          prevIndex === heroBackgrounds.length - 1 ? 0 : prevIndex + 1
+        );
+        setIsFading(false);
+      }, 1000); // Match transition duration
     }, 5000);
+
     return () => clearInterval(interval);
+  }, [heroBackgrounds]);
+
+  // Animate sections on scroll
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            entry.target.classList.add("animate-fadeInUp");
+            if (entry.target.id === "how-it-works") {
+              const cards = entry.target.querySelectorAll(".step-card");
+              cards.forEach((card, index) => {
+                card.style.transitionDelay = `${index * 200}ms`;
+                card.classList.add("animate-step");
+              });
+            }
+            observer.unobserve(entry.target);
+          }
+        });
+      },
+      { threshold: 0.1 }
+    );
+
+    sectionRefs.current.forEach((ref) => {
+      if (ref) observer.observe(ref);
+    });
+
+    return () => {
+      sectionRefs.current.forEach((ref) => {
+        if (ref) observer.unobserve(ref);
+      });
+    };
   }, []);
 
   return (
-    <div
-      style={{
-        fontFamily: "'Inter', sans-serif",
-        backgroundColor: "#f8f9fa",
-        minHeight: "100vh",
-        overflowX: "hidden",
-      }}
-    >
-      {/* Hero Section with Rotating Background Images */}
-      <section
-        style={{
-          padding: "120px 20px 80px",
-          background: `linear-gradient(rgba(26, 35, 126, 0.7), rgba(40, 53, 147, 0.7)), url(${heroBackgrounds[currentBgIndex]})`,
-          backgroundSize: "cover",
-          backgroundPosition: "center",
-          textAlign: "center",
-          color: "white",
-          position: "relative",
-          overflow: "hidden",
-          width: "100vw",
-          minHeight: "100vh",
-          marginLeft: "calc(-50vw + 50%)",
-          transition: "background-image 1s ease-in-out",
-        }}
-      >
-        {/* Background image indicators */}
-        <div
-          style={{
-            position: "absolute",
-            bottom: "30px",
-            left: "50%",
-            transform: "translateX(-50%)",
-            display: "flex",
-            gap: "10px",
-            zIndex: 2,
-          }}
-        >
-          {heroBackgrounds.map((_, index) => (
-            <div
-              key={index}
-              style={{
-                width: "12px",
-                height: "12px",
-                borderRadius: "50%",
-                backgroundColor:
-                  index === currentBgIndex
-                    ? "#4fc3f7"
-                    : "rgba(255,255,255,0.5)",
-                cursor: "pointer",
-                transition: "all 0.3s ease",
-              }}
-              onClick={() => setCurrentBgIndex(index)}
-            />
-          ))}
-        </div>
+    <>
+      {/* Tailwind Custom Styles */}
+      <style>
+        {`
+          @tailwind base;
+          @tailwind components;
+          @tailwind utilities;
 
-        <div
-          style={{
-            maxWidth: "1200px",
-            margin: "0 auto",
-            position: "relative",
-            zIndex: 1,
-          }}
-        >
-          <h1
-            style={{
-              fontSize: "clamp(2.5rem, 5vw, 3.5rem)",
-              fontWeight: "800",
-              marginBottom: "24px",
-              lineHeight: "1.2",
-              padding: "0 20px",
-              textShadow: "0 2px 4px rgba(0,0,0,0.3)",
-            }}
-          >
-            Find Trusted Services in{" "}
-            <span style={{ color: "#4fc3f7" }}>Kenya</span>
-          </h1>
-          <p
-            style={{
-              fontSize: "clamp(1rem, 2vw, 1.25rem)",
-              maxWidth: "720px",
-              margin: "0 auto 40px",
-              opacity: "0.9",
-              padding: "0 20px",
-              textShadow: "0 1px 2px rgba(0,0,0,0.2)",
-            }}
-          >
-            Connecting skilled professionals with customers across Kenya. From
-            electricians to mama fuas,we help you hire or offer trusted services
-            easily.
-          </p>
-          <div
-            style={{
-              display: "flex",
-              gap: "16px",
-              justifyContent: "center",
-              flexWrap: "wrap",
-            }}
-          >
-            <Link
-              to="/services"
-              style={{
-                padding: "14px 32px",
-                backgroundColor: "#4fc3f7",
-                color: "#0d47a1",
-                textDecoration: "none",
-                borderRadius: "50px",
-                fontWeight: "600",
-                fontSize: "1rem",
-                transition: "all 0.3s ease",
-                boxShadow: "0 4px 6px rgba(0,0,0,0.1)",
-                ":hover": {
-                  transform: "translateY(-2px) scale(1.02)",
-                  boxShadow: "0 6px 12px rgba(0,0,0,0.2)",
-                  backgroundColor: "#3fb3e6",
-                },
-              }}
-            >
-              Explore Services
-            </Link>
-            <Link
-              to="/login"
-              style={{
-                padding: "14px 32px",
-                backgroundColor: "transparent",
-                color: "white",
-                textDecoration: "none",
-                borderRadius: "50px",
-                fontWeight: "600",
-                fontSize: "1rem",
-                border: "2px solid rgba(255,255,255,0.3)",
-                transition: "all 0.3s ease",
-                ":hover": {
-                  backgroundColor: "rgba(255,255,255,0.15)",
-                  borderColor: "rgba(255,255,255,0.7)",
-                  transform: "translateY(-2px)",
-                },
-              }}
-            >
-              Get Started
-            </Link>
-          </div>
-        </div>
-        <div
-          style={{
-            position: "absolute",
-            bottom: "-100px",
-            right: "-100px",
-            width: "400px",
-            height: "400px",
-            borderRadius: "50%",
-            background:
-              "radial-gradient(circle, rgba(79,195,247,0.2) 0%, rgba(79,195,247,0) 70%)",
-          }}
-        ></div>
-      </section>
+          @layer utilities {
+            .animate-pulse-custom {
+              animation: pulse-custom 1.5s infinite;
+            }
 
-      {/* How It Works Section */}
-      <section
-        style={{
-          padding: "80px 20px",
-          backgroundColor: "white",
-          width: "100vw",
-          marginLeft: "calc(-50vw + 50%)",
-          boxSizing: "border-box",
-        }}
-      >
-        <div style={{ maxWidth: "1200px", margin: "0 auto" }}>
-          <div style={{ textAlign: "center", marginBottom: "48px" }}>
-            <span
-              style={{
-                display: "inline-block",
-                backgroundColor: "#e3f2fd",
-                color: "#1a237e",
-                padding: "8px 16px",
-                borderRadius: "50px",
-                fontWeight: "600",
-                marginBottom: "16px",
-                fontSize: "0.875rem",
-              }}
-            >
-              HOW IT WORKS
-            </span>
-            <h2
-              style={{
-                fontSize: "clamp(1.5rem, 3vw, 2rem)",
-                fontWeight: "700",
-                marginBottom: "16px",
-                color: "#1a237e",
-                padding: "0 20px",
-              }}
-            >
-              Get Services in 3 Simple Steps
-            </h2>
-            <p
-              style={{
-                maxWidth: "600px",
-                margin: "0 auto",
-                color: "#666",
-                padding: "0 20px",
-              }}
-            >
-              ServiceSoko makes it easy to connect with trusted professionals in
-              your area
-            </p>
-          </div>
+            @keyframes pulse-custom {
+              0% {
+                transform: scale(1);
+              }
+              50% {
+                transform: scale(1.15);
+              }
+              100% {
+                transform: scale(1);
+              }
+            }
+
+            .animate-fadeInUp {
+              opacity: 1 !important;
+              transform: translateY(0) !important;
+              transition: opacity 0.6s ease-out, transform 0.6s ease-out;
+            }
+
+            .animate-step {
+              opacity: 1 !important;
+              transform: scale(1) !important;
+              transition: opacity 0.6s ease-out, transform 0.6s ease-out;
+            }
+          }
+        `}
+      </style>
+
+      <div className="bg-black text-white">
+        {/* Hero Section */}
+        <section
+          className="relative w-screen min-h-screen flex items-center justify-center text-white overflow-hidden"
+        >
           <div
+            className="absolute inset-0 bg-cover bg-center bg-no-repeat transition-transform duration-[5000ms] ease-linear"
             style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))",
-              gap: "40px",
-              padding: "0 20px",
+              backgroundImage: `linear-gradient(rgba(0, 0, 0, 0.7), rgba(0, 0, 0, 0.7)), url(${heroBackgrounds[currentBgIndex]})`,
+              transform: isFading ? "scale(1.05)" : "scale(1)",
+              opacity: isFading ? 0 : 1,
+              transitionProperty: "opacity",
+              transitionDuration: "1000ms",
+              transitionTimingFunction: "ease-in-out",
             }}
-          >
-            {[
-              {
-                image:
-                  "https://images.unsplash.com/photo-1551288049-bebda4e38f71?ixlib=rb-1.2.1&auto=format&fit=crop&w=500&q=80",
-                title: "Describe Your Need",
-                description: "Tell us what service you're looking for",
-                step: "1",
-              },
-              {
-                image:
-                  "https://images.unsplash.com/photo-1581093450021-4a7360e9a7e3?ixlib=rb-1.2.1&auto=format&fit=crop&w=500&q=80",
-                title: "Get Matched",
-                description: "We connect you with qualified professionals",
-                step: "2",
-              },
-              {
-                image:
-                  "https://images.unsplash.com/photo-1600880292203-757bb62b4baf?ixlib=rb-1.2.1&auto=format&fit=crop&w=500&q=80",
-                title: "Get It Done",
-                description: "Your task is completed to your satisfaction",
-                step: "3",
-              },
-            ].map((step, index) => (
-              <div
+          />
+          <div
+            className="absolute inset-0 bg-cover bg-center bg-no-repeat transition-transform duration-[5000ms] ease-linear"
+            style={{
+              backgroundImage: `linear-gradient(rgba(0, 0, 0, 0.7), rgba(0, 0, 0, 0.7)), url(${heroBackgrounds[nextBgIndex]})`,
+              transform: isFading ? "scale(1)" : "scale(1.05)",
+              opacity: isFading ? 1 : 0,
+              transitionProperty: "opacity",
+              transitionDuration: "1000ms",
+              transitionTimingFunction: "ease-in-out",
+            }}
+          />
+          {/* Background image indicators */}
+          <div className="absolute bottom-8 left-1/2 transform -translate-x-1/2 flex gap-2 z-10">
+            {heroBackgrounds.map((_, index) => (
+              <button
                 key={index}
-                style={{ textAlign: "center", position: "relative" }}
-              >
-                <div
-                  style={{
-                    position: "absolute",
-                    top: "-15px",
-                    left: "50%",
-                    transform: "translateX(-50%)",
-                    width: "50px",
-                    height: "50px",
-                    backgroundColor: "#4fc3f7",
-                    borderRadius: "50%",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    color: "white",
-                    fontWeight: "700",
-                    fontSize: "1.25rem",
-                    boxShadow: "0 4px 8px rgba(0,0,0,0.1)",
-                    zIndex: 1,
-                  }}
-                >
-                  {step.step}
-                </div>
-                <div
-                  style={{
-                    height: "180px",
-                    width: "180px",
-                    borderRadius: "50%",
-                    backgroundImage: `url(${step.image})`,
-                    backgroundSize: "cover",
-                    backgroundPosition: "center",
-                    margin: "30px auto 20px",
-                    border: "3px solid #4fc3f7",
-                    boxShadow: "0 8px 16px rgba(0,0,0,0.1)",
-                  }}
-                />
-                <h3
-                  style={{
-                    fontSize: "1.25rem",
-                    fontWeight: "600",
-                    marginBottom: "12px",
-                    color: "#1a237e",
-                  }}
-                >
-                  {step.title}
-                </h3>
-                <p style={{ color: "#666", lineHeight: "1.6" }}>
-                  {step.description}
-                </p>
-              </div>
+                className={`w-3 h-3 rounded-full transition-all duration-300 ${
+                  index === currentBgIndex
+                    ? "bg-cyan-400 scale-110"
+                    : "bg-white bg-opacity-50"
+                }`}
+                onClick={() => {
+                  setIsFading(true);
+                  setTimeout(() => {
+                    setCurrentBgIndex(index);
+                    setNextBgIndex(
+                      index === heroBackgrounds.length - 1 ? 0 : index + 1
+                    );
+                    setIsFading(false);
+                  }, 1000);
+                }}
+                aria-label={`Go to slide ${index + 1}`}
+              />
             ))}
           </div>
-        </div>
-      </section>
 
-      {/* Value Proposition Section */}
-      <section
-        style={{
-          padding: "80px 20px",
-          maxWidth: "1200px",
-          margin: "0 auto",
-          width: "100%",
-          boxSizing: "border-box",
-        }}
-      >
-        <div style={{ textAlign: "center", marginBottom: "48px" }}>
-          <span
-            style={{
-              display: "inline-block",
-              backgroundColor: "#e3f2fd",
-              color: "#1a237e",
-              padding: "8px 16px",
-              borderRadius: "50px",
-              fontWeight: "600",
-              marginBottom: "16px",
-              fontSize: "0.875rem",
-            }}
-          >
-            WHY CHOOSE US
-          </span>
-          <h2
-            style={{
-              fontSize: "clamp(1.5rem, 3vw, 2rem)",
-              fontWeight: "700",
-              marginBottom: "16px",
-              color: "#1a237e",
-              padding: "0 20px",
-            }}
-          >
-            ServiceSoko Benefits
-          </h2>
-          <p
-            style={{
-              maxWidth: "600px",
-              margin: "0 auto",
-              color: "#666",
-              padding: "0 20px",
-            }}
-          >
-            We make service hiring safe, easy and reliable for everyone
-          </p>
-        </div>
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
-            gap: "32px",
-            padding: "0 20px",
-          }}
+          <div className="max-w-6xl mx-auto px-5 relative z-10 transition-opacity duration-500 animate-fadeInUp">
+            <h1 className="text-4xl md:text-5xl lg:text-6xl font-bold mb-6 leading-tight px-5 text-center">
+              Find Trusted Services in{" "}
+              <span className="text-cyan-400">Kenya</span>
+            </h1>
+            <p className="text-lg md:text-xl max-w-3xl mx-auto mb-10 px-5 text-center text-white text-opacity-80">
+              Connecting skilled professionals with customers across Kenya. From
+              electricians to mama fuas, we help you hire or offer trusted
+              services easily.
+            </p>
+            <div className="flex gap-4 justify-center flex-wrap">
+              <Link
+                to="/services"
+                className="px-8 py-3 bg-cyan-400 text-black font-bold rounded-full transition-all hover:bg-cyan-500 hover:shadow-lg hover:-translate-y-1 transform"
+              >
+                Explore Services
+              </Link>
+              <Link
+                to="/login"
+                className="px-8 py-3 bg-transparent text-white font-bold rounded-full border-2 border-white border-opacity-30 transition-all hover:bg-white hover:bg-opacity-15 hover:border-opacity-70 hover:-translate-y-1 transform"
+              >
+                Get Started
+              </Link>
+            </div>
+          </div>
+
+          {/* Decorative elements */}
+          <div className="absolute bottom-0 right-0 w-64 h-64 md:w-96 md:h-96 rounded-full bg-gradient-radial from-cyan-400/20 to-transparent -mr-32 -mb-32"></div>
+        </section>
+
+        {/* How It Works Section */}
+        <section
+          id="how-it-works"
+          ref={(el) => (sectionRefs.current[0] = el)}
+          className="py-20 bg-white text-black w-screen -ml-[calc(50vw-50%)] px-5 opacity-0"
         >
-          {[
-            {
-              icon: "https://cdn-icons-png.flaticon.com/512/1828/1828884.png",
-              title: "Verified Professionals",
-              description:
-                "All service providers are thoroughly vetted for quality and reliability",
-            },
-            {
-              icon: "https://cdn-icons-png.flaticon.com/512/2489/2489756.png",
-              title: "Secure Payments",
-              description:
-                "Your money is protected until the job is completed to your satisfaction",
-            },
-            {
-              icon: "https://cdn-icons-png.flaticon.com/512/869/869869.png",
-              title: "Customer Protection",
-              description: "24/7 support and dispute resolution for any issues",
-            },
-          ].map((feature, index) => (
-            <div
-              key={index}
-              style={{
-                backgroundColor: "white",
-                borderRadius: "12px",
-                padding: "32px 24px",
-                boxShadow: "0 8px 24px rgba(0,0,0,0.05)",
-                transition: "all 0.3s ease",
-                borderBottom: "3px solid transparent",
-                ":hover": {
-                  transform: "translateY(-5px)",
-                  boxShadow: "0 12px 28px rgba(0,0,0,0.1)",
-                  borderBottom: "3px solid #4fc3f7",
-                },
-              }}
-            >
-              <div
-                style={{
-                  fontSize: "2.5rem",
-                  marginBottom: "16px",
-                  background: "#e3f2fd",
-                  width: "80px",
-                  height: "80px",
-                  borderRadius: "50%",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  transition: "transform 0.3s ease",
-                  ":hover": {
-                    transform: "scale(1.1)",
-                  },
-                }}
-              >
-                <img
-                  src={feature.icon}
-                  alt={feature.title}
-                  style={{ width: "40px", height: "40px" }}
-                />
-              </div>
-              <h3
-                style={{
-                  fontSize: "1.25rem",
-                  fontWeight: "600",
-                  marginBottom: "12px",
-                  color: "#1a237e",
-                }}
-              >
-                {feature.title}
-              </h3>
-              <p
-                style={{
-                  color: "#555",
-                  lineHeight: "1.6",
-                }}
-              >
-                {feature.description}
+          <div className="max-w-6xl mx-auto">
+            <div className="text-center mb-12">
+              <span className="inline-block bg-gray-100 text-black px-4 py-2 rounded-full font-bold text-sm mb-4">
+                HOW IT WORKS
+              </span>
+              <h2 className="text-3xl md:text-4xl font-bold mb-4">
+                Get Services in 3 Simple Steps
+              </h2>
+              <p className="max-w-2xl mx-auto text-gray-600">
+                ServiceSoko makes it easy to connect with trusted professionals in
+                your area
               </p>
             </div>
-          ))}
-        </div>
-      </section>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-10">
+              {[
+                {
+                  image:
+                    "https://images.unsplash.com/photo-1551288049-bebda4e38f71?ixlib=rb-1.2.1&auto=format&fit=crop&w=500&q=80",
+                  title: "Describe Your Need",
+                  description: "Tell us what service you're looking for",
+                  step: "1",
+                },
+                {
+                  image:
+                    "https://images.unsplash.com/photo-1581093450021-4a7360e9a7e3?ixlib=rb-1.2.1&auto=format&fit=crop&w=500&q=80",
+                  title: "Get Matched",
+                  description: "We connect you with qualified professionals",
+                  step: "2",
+                },
+                {
+                  image:
+                    "https://images.unsplash.com/photo-1600880292203-757bb62b4baf?ixlib=rb-1.2.1&auto=format&fit=crop&w=500&q=80",
+                  title: "Get It Done",
+                  description: "Your task is completed to your satisfaction",
+                  step: "3",
+                },
+              ].map((step, index) => (
+                <div
+                  key={index}
+                  className="text-center relative step-card opacity-0 scale-95"
+                >
+                  <div className="absolute -top-5 left-1/2 transform -translate-x-1/2 w-12 h-12 bg-cyan-400 rounded-full flex items-center justify-center text-white font-bold text-xl shadow-md transition-transform duration-300 hover:scale-110 hover:animate-pulse-custom">
+                    {step.step}
+                  </div>
+                  <div
+                    className="h-40 w-40 md:h-48 md:w-48 rounded-full bg-cover bg-center mx-auto mt-8 border-4 border-cyan-400 shadow-xl transition-transform duration-300 hover:scale-105"
+                    style={{ backgroundImage: `url(${step.image})` }}
+                  />
+                  <h3 className="text-xl font-bold mt-6 mb-3">{step.title}</h3>
+                  <p className="text-gray-600 leading-relaxed">
+                    {step.description}
+                  </p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
 
-      {/* Featured Services Section */}
-      <section
-        style={{
-          padding: "80px 20px",
-          backgroundColor: "#f5f7ff",
-          width: "100vw",
-          marginLeft: "calc(-50vw + 50%)",
-          boxSizing: "border-box",
-        }}
-      >
-        <div
-          style={{
-            maxWidth: "1200px",
-            margin: "0 auto",
-            width: "100%",
-          }}
+        {/* Value Proposition Section */}
+        <section
+          ref={(el) => (sectionRefs.current[1] = el)}
+          className="py-20 max-w-6xl mx-auto px-5 bg-black text-white opacity-0"
         >
-          <div style={{ textAlign: "center", marginBottom: "48px" }}>
-            <span
-              style={{
-                display: "inline-block",
-                backgroundColor: "#e3f2fd",
-                color: "#1a237e",
-                padding: "8px 16px",
-                borderRadius: "50px",
-                fontWeight: "600",
-                marginBottom: "16px",
-                fontSize: "0.875rem",
-              }}
-            >
-              POPULAR SERVICES
+          <div className="text-center mb-12">
+            <span className="inline-block bg-gray-800 text-white px-4 py-2 rounded-full font-bold text-sm mb-4">
+              WHY CHOOSE US
             </span>
-            <h2
-              style={{
-                fontSize: "clamp(1.5rem, 3vw, 2rem)",
-                fontWeight: "700",
-                marginBottom: "16px",
-                color: "#1a237e",
-                padding: "0 20px",
-              }}
-            >
-              Services You Can Book Today
+            <h2 className="text-3xl md:text-4xl font-bold mb-4">
+              ServiceSoko Benefits
             </h2>
-            <p
-              style={{
-                maxWidth: "600px",
-                margin: "0 auto",
-                color: "#666",
-                padding: "0 20px",
-              }}
-            >
-              Trusted professionals ready to help with your needs
+            <p className="max-w-2xl mx-auto text-gray-400">
+              We make service hiring safe, easy and reliable for everyone
             </p>
           </div>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(250px, 1fr))",
-              gap: "24px",
-              padding: "0 20px",
-            }}
-          >
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
             {[
               {
-                name: "Plumbing Services",
-                description: "Fix leaks, install fixtures, and more",
-                price: "From KES 1,500",
-                image:
-                  "https://images.unsplash.com/photo-1603302576837-37561b2e2302?ixlib=rb-1.2.1&auto=format&fit=crop&w=500&q=80",
+                icon: "https://cdn-icons-png.flaticon.com/512/1828/1828884.png",
+                title: "Verified Professionals",
+                description:
+                  "All service providers are thoroughly vetted for quality and reliability",
               },
               {
-                name: "Electrical Work",
-                description: "Wiring, installations, and repairs",
-                price: "From KES 2,000",
-                image:
-                  "https://images.unsplash.com/photo-1581093057305-25a8e1e9e1b9?ixlib=rb-1.2.1&auto=format&fit=crop&w=500&q=80",
+                icon: "https://cdn-icons-png.flaticon.com/512/2489/2489756.png",
+                title: "Secure Payments",
+                description:
+                  "Your money is protected until the job is completed to your satisfaction",
               },
               {
-                name: "Cleaning Services",
-                description: "Home and office cleaning",
-                price: "From KES 1,000",
-                image:
-                  "https://images.unsplash.com/photo-1581578731548-c64695cc6952?ixlib=rb-1.2.1&auto=format&fit=crop&w=500&q=80",
+                icon: "https://cdn-icons-png.flaticon.com/512/869/869869.png",
+                title: "Customer Protection",
+                description: "24/7 support and dispute resolution for any issues",
               },
-              {
-                name: "Movers & Packers",
-                description: "Reliable moving services",
-                price: "From KES 5,000",
-                image:
-                  "https://images.unsplash.com/photo-1555212697-194d092e3b8f?ixlib=rb-1.2.1&auto=format&fit=crop&w=500&q=80",
-              },
-            ].map((service, index) => (
+            ].map((feature, index) => (
               <div
                 key={index}
-                style={{
-                  backgroundColor: "white",
-                  borderRadius: "12px",
-                  overflow: "hidden",
-                  boxShadow: "0 8px 16px rgba(0,0,0,0.05)",
-                  transition: "all 0.3s ease",
-                  ":hover": {
-                    transform: "translateY(-8px)",
-                    boxShadow: "0 12px 24px rgba(0,0,0,0.1)",
-                  },
-                }}
+                className="bg-gray-800 rounded-xl p-8 shadow-lg hover:shadow-xl transition-all duration-300 border-b-4 border-transparent hover:border-cyan-400 hover:-translate-y-2"
               >
+                <div className="w-20 h-20 bg-gray-700 rounded-full flex items-center justify-center mx-auto mb-6 transition-transform duration-300 hover:scale-110">
+                  <img
+                    src={feature.icon}
+                    alt={feature.title}
+                    className="w-10 h-10"
+                  />
+                </div>
+                <h3 className="text-xl font-bold mb-3">{feature.title}</h3>
+                <p className="text-gray-400 leading-relaxed">
+                  {feature.description}
+                </p>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {/* Featured Services Section */}
+        <section
+          ref={(el) => (sectionRefs.current[2] = el)}
+          className="py-20 bg-white text-black w-screen -ml-[calc(50vw-50%)] px-5 opacity-0"
+        >
+          <div className="max-w-6xl mx-auto">
+            <div className="text-center mb-12">
+              <span className="inline-block bg-gray-100 text-black px-4 py-2 rounded-full font-bold text-sm mb-4">
+                POPULAR SERVICES
+              </span>
+              <h2 className="text-3xl md:text-4xl font-bold mb-4">
+                Services You Can Book Today
+              </h2>
+              <p className="max-w-2xl mx-auto text-gray-600">
+                Trusted professionals ready to help with your needs
+              </p>
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+              {[
+                {
+                  name: "Plumbing Services",
+                  description: "Fix leaks, install fixtures, and more",
+                  price: "From KES 1,500",
+                  image: "/images/plumbing.png",
+                },
+                {
+                  name: "Electrical Work",
+                  description: "Wiring, installations, and repairs",
+                  price: "From KES 2,000",
+                  image: "/images/electrical.png",
+                },
+                {
+                  name: "Cleaning Services",
+                  description: "Home and office cleaning",
+                  price: "From KES 1,000",
+                  image: "/images/cleaning.png",
+                },
+                {
+                  name: "Movers & Packers",
+                  description: "Reliable moving services",
+                  price: "From KES 5,000",
+                  image: "/images/movers.png",
+                },
+              ].map((service, index) => (
                 <div
-                  style={{
-                    height: "180px",
-                    backgroundColor: "#e3f2fd",
-                    backgroundImage: `url(${service.image})`,
-                    backgroundSize: "cover",
-                    backgroundPosition: "center",
-                    transition: "transform 0.5s ease",
-                    ":hover": {
-                      transform: "scale(1.05)",
-                    },
-                  }}
-                ></div>
-                <div style={{ padding: "24px" }}>
-                  <h3
-                    style={{
-                      fontSize: "1.25rem",
-                      fontWeight: "600",
-                      marginBottom: "8px",
-                      color: "#1a237e",
-                    }}
-                  >
-                    {service.name}
-                  </h3>
-                  <p
-                    style={{
-                      color: "#666",
-                      marginBottom: "16px",
-                      minHeight: "48px",
-                    }}
-                  >
-                    {service.description}
-                  </p>
+                  key={index}
+                  className="bg-white rounded-xl overflow-hidden shadow-md hover:shadow-lg transition-all duration-300 hover:-translate-y-2"
+                >
                   <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                    }}
-                  >
-                    <span
-                      style={{
-                        fontWeight: "600",
-                        color: "#1a237e",
-                      }}
-                    >
-                      {service.price}
-                    </span>
-                    <Link
-                      to="/services"
-                      style={{
-                        padding: "8px 16px",
-                        backgroundColor: "#4fc3f7",
-                        color: "#0d47a1",
-                        textDecoration: "none",
-                        borderRadius: "50px",
-                        fontWeight: "500",
-                        fontSize: "0.875rem",
-                        transition: "all 0.3s ease",
-                        ":hover": {
-                          backgroundColor: "#3fb3e6",
-                          transform: "translateY(-2px)",
-                          boxShadow: "0 4px 8px rgba(0,0,0,0.1)",
-                        },
-                      }}
-                    >
-                      Book Now
-                    </Link>
+                    className="h-48 bg-gray-100 bg-cover bg-center transition-transform duration-500 hover:scale-105"
+                    style={{ backgroundImage: `url(${service.image})` }}
+                  ></div>
+                  <div className="p-6">
+                    <h3 className="text-xl font-bold mb-2">{service.name}</h3>
+                    <p className="text-gray-600 mb-4 min-h-[3.5rem]">
+                      {service.description}
+                    </p>
+                    <div className="flex justify-between items-center">
+                      <span className="font-bold">{service.price}</span>
+                      <Link
+                        to={`/services/${service.id}`}
+                        className="px-4 py-2 bg-cyan-400 text-black font-bold text-sm rounded-full transition-all hover:bg-cyan-500"
+                      >
+                        Book Now
+                      </Link>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              ))}
+            </div>
           </div>
-        </div>
-      </section>
+        </section>
 
-      {/* Testimonials Section */}
-      <section
-        style={{
-          padding: "80px 20px",
-          backgroundColor: "white",
-          width: "100vw",
-          marginLeft: "calc(-50vw + 50%)",
-          boxSizing: "border-box",
-        }}
-      >
-        <div
-          style={{
-            maxWidth: "1200px",
-            margin: "0 auto",
-            width: "100%",
-          }}
+        {/* Testimonials Section */}
+        <section
+          ref={(el) => (sectionRefs.current[3] = el)}
+          className="py-20 bg-black text-white w-screen -ml-[calc(50vw-50%)] px-5 opacity-0"
         >
-          <div style={{ textAlign: "center", marginBottom: "48px" }}>
-            <span
-              style={{
-                display: "inline-block",
-                backgroundColor: "#e3f2fd",
-                color: "#1a237e",
-                padding: "8px 16px",
-                borderRadius: "50px",
-                fontWeight: "600",
-                marginBottom: "16px",
-                fontSize: "0.875rem",
-              }}
-            >
-              TESTIMONIALS
-            </span>
-            <h2
-              style={{
-                fontSize: "clamp(1.5rem, 3vw, 2rem)",
-                fontWeight: "700",
-                marginBottom: "16px",
-                color: "#1a237e",
-                padding: "0 20px",
-              }}
-            >
-              Trusted by Thousands
+          <div className="max-w-6xl mx-auto">
+            <div className="text-center mb-12">
+              <span className="inline-block bg-gray-800 text-white px-4 py-2 rounded-full font-bold text-sm mb-4">
+                TESTIMONIALS
+              </span>
+              <h2 className="text-3xl md:text-4xl font-bold mb-4">
+                Trusted by Thousands
+              </h2>
+              <p className="max-w-2xl mx-auto text-gray-400">
+                What our customers and service providers say about us
+              </p>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+              {[
+                {
+                  quote:
+                    "Found a great plumber who fixed my leak in under an hour!",
+                  author: "James M., Nairobi",
+                  rating: "★★★★★",
+                  image: "https://randomuser.me/api/portraits/men/32.jpg",
+                  role: "Homeowner",
+                },
+                {
+                  quote:
+                    "The electrician was professional and reasonably priced.",
+                  author: "Sarah W., Mombasa",
+                  rating: "★★★★☆",
+                  image: "https://randomuser.me/api/portraits/women/44.jpg",
+                  role: "Business Owner",
+                },
+                {
+                  quote:
+                    "Best platform to find trusted service providers in Kenya.",
+                  author: "David K., Kisumu",
+                  rating: "★★★★★",
+                  image: "https://randomuser.me/api/portraits/men/75.jpg",
+                  role: "Service Provider",
+                },
+              ].map((testimonial, index) => (
+                <div
+                  key={index}
+                  className="bg-gray-800 rounded-xl p-8 relative hover:bg-gray-700 hover:shadow-lg transition-all duration-300"
+                >
+                  <div
+                    className="absolute -top-6 left-6 w-14 h-14 rounded-full bg-cover border-4 border-white shadow-md"
+                    style={{ backgroundImage: `url(${testimonial.image})` }}
+                  />
+                  <div className="text-2xl text-cyan-400 mb-4">
+                    {testimonial.rating}
+                  </div>
+                  <p className="text-lg italic mb-6 leading-relaxed">
+                    "{testimonial.quote}"
+                  </p>
+                  <div>
+                    <p className="font-bold mb-1">{testimonial.author}</p>
+                    <p className="text-gray-400 text-sm">{testimonial.role}</p>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        </section>
+
+        {/* CTA Section */}
+        <section
+          ref={(el) => (sectionRefs.current[4] = el)}
+          className="py-24 bg-gradient-to-br from-black to-gray-800 text-center text-white w-screen -ml-[calc(50vw-50%)] px-5 opacity-0"
+        >
+          <div className="max-w-4xl mx-auto">
+            <h2 className="text-3xl md:text-4xl font-bold mb-6">
+              Ready to Find or Offer Services in Kenya?
             </h2>
-            <p
-              style={{
-                maxWidth: "600px",
-                margin: "0 auto",
-                color: "#666",
-                padding: "0 20px",
-              }}
-            >
-              What our customers and service providers say about us
+            <p className="text-xl mb-10 text-white text-opacity-80">
+              Join thousands of satisfied customers and service providers today.
             </p>
-          </div>
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
-              gap: "32px",
-              padding: "0 20px",
-            }}
-          >
-            {[
-              {
-                quote:
-                  "Found a great plumber who fixed my leak in under an hour!",
-                author: "James M., Nairobi",
-                rating: "★★★★★",
-                image: "https://randomuser.me/api/portraits/men/32.jpg",
-                role: "Homeowner",
-              },
-              {
-                quote:
-                  "The electrician was professional and reasonably priced.",
-                author: "Sarah W., Mombasa",
-                rating: "★★★★☆",
-                image: "https://randomuser.me/api/portraits/women/44.jpg",
-                role: "Business Owner",
-              },
-              {
-                quote:
-                  "Best platform to find trusted service providers in Kenya.",
-                author: "David K., Kisumu",
-                rating: "★★★★★",
-                image: "https://randomuser.me/api/portraits/men/75.jpg",
-                role: "Service Provider",
-              },
-            ].map((testimonial, index) => (
-              <div
-                key={index}
-                style={{
-                  backgroundColor: "#f8f9fa",
-                  borderRadius: "12px",
-                  padding: "32px",
-                  position: "relative",
-                  transition: "all 0.3s ease",
-                  ":hover": {
-                    transform: "translateY(-5px)",
-                    boxShadow: "0 8px 16px rgba(0,0,0,0.1)",
-                    backgroundColor: "white",
-                  },
-                }}
+            <div className="flex gap-4 justify-center flex-wrap">
+              <Link
+                to="/signup"
+                className="px-8 py-4 bg-white text-black font-bold rounded-full transition-all hover:bg-gray-100 hover:shadow-lg hover:-translate-y-1 transform"
               >
-                <div
-                  style={{
-                    position: "absolute",
-                    top: "-25px",
-                    left: "25px",
-                    width: "60px",
-                    height: "60px",
-                    borderRadius: "50%",
-                    backgroundImage: `url(${testimonial.image})`,
-                    backgroundSize: "cover",
-                    border: "3px solid white",
-                    boxShadow: "0 4px 8px rgba(0,0,0,0.1)",
-                    zIndex: 2,
-                  }}
-                />
-                <div
-                  style={{
-                    fontSize: "1.5rem",
-                    color: "#4fc3f7",
-                    marginBottom: "16px",
-                  }}
-                >
-                  {testimonial.rating}
-                </div>
-                <p
-                  style={{
-                    fontSize: "1.125rem",
-                    fontStyle: "italic",
-                    marginBottom: "24px",
-                    lineHeight: "1.6",
-                  }}
-                >
-                  "{testimonial.quote}"
-                </p>
-                <div>
-                  <p
-                    style={{
-                      fontWeight: "600",
-                      color: "#1a237e",
-                      marginBottom: "4px",
-                    }}
-                  >
-                    {testimonial.author}
-                  </p>
-                  <p style={{ color: "#666", fontSize: "0.875rem" }}>
-                    {testimonial.role}
-                  </p>
-                </div>
-              </div>
-            ))}
+                Sign Up Now
+              </Link>
+              <Link
+                to="/services"
+                className="px-8 py-4 bg-transparent text-white font-bold rounded-full border-2 border-white border-opacity-30 transition-all hover:bg-white hover:bg-opacity-15 hover:border-opacity-70 hover:-translate-y-1 transform"
+              >
+                Browse Services
+              </Link>
+            </div>
           </div>
-        </div>
-      </section>
-
-      {/* CTA Section */}
-      <section
-        style={{
-          padding: "100px 20px",
-          background: "linear-gradient(135deg, #1a237e 0%, #4fc3f7 100%)",
-          textAlign: "center",
-          color: "white",
-          width: "100vw",
-          marginLeft: "calc(-50vw + 50%)",
-          boxSizing: "border-box",
-        }}
-      >
-        <div
-          style={{
-            maxWidth: "800px",
-            margin: "0 auto",
-            width: "100%",
-          }}
-        >
-          <h2
-            style={{
-              fontSize: "clamp(1.75rem, 3vw, 2.5rem)",
-              fontWeight: "700",
-              marginBottom: "24px",
-              padding: "0 20px",
-              lineHeight: "1.3",
-            }}
-          >
-            Ready to Find or Offer Services in Kenya?
-          </h2>
-          <p
-            style={{
-              fontSize: "clamp(1rem, 2vw, 1.25rem)",
-              marginBottom: "40px",
-              opacity: "0.9",
-              padding: "0 20px",
-            }}
-          >
-            Join thousands of satisfied customers and service providers today.
-          </p>
-          <div
-            style={{
-              display: "flex",
-              gap: "16px",
-              justifyContent: "center",
-              flexWrap: "wrap",
-            }}
-          >
-            <Link
-              to="/signup"
-              style={{
-                padding: "16px 40px",
-                backgroundColor: "white",
-                color: "#1a237e",
-                textDecoration: "none",
-                borderRadius: "50px",
-                fontWeight: "600",
-                fontSize: "1.125rem",
-                transition: "all 0.3s ease",
-                display: "inline-block",
-                boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
-                ":hover": {
-                  transform: "translateY(-3px)",
-                  boxShadow: "0 8px 20px rgba(0,0,0,0.25)",
-                  backgroundColor: "#f5f5f5",
-                },
-              }}
-            >
-              Sign Up Now
-            </Link>
-            <Link
-              to="/services"
-              style={{
-                padding: "16px 40px",
-                backgroundColor: "transparent",
-                color: "white",
-                textDecoration: "none",
-                borderRadius: "50px",
-                fontWeight: "600",
-                fontSize: "1.125rem",
-                border: "2px solid rgba(255,255,255,0.3)",
-                transition: "all 0.3s ease",
-                display: "inline-block",
-                ":hover": {
-                  backgroundColor: "rgba(255,255,255,0.15)",
-                  borderColor: "rgba(255,255,255,0.7)",
-                  transform: "translateY(-3px)",
-                },
-              }}
-            >
-              Browse Services
-            </Link>
-          </div>
-        </div>
-      </section>
-    </div>
+        </section>
+      </div>
+    </>
   );
 }
 

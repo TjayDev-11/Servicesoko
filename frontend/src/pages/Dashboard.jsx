@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, memo } from "react";
 import { useNavigate, Link } from "react-router-dom";
+import { TransitionGroup, CSSTransition } from "react-transition-group";
 import useStore from "../store";
 import {
   FaSearch,
@@ -12,10 +13,60 @@ import {
   FaTools,
   FaRegCheckCircle,
   FaRegTimesCircle,
+  FaChevronDown,
+  FaChevronUp,
+  FaTrash,
 } from "react-icons/fa";
 import ChatModal from "../components/ChatModal";
 
+// Skeleton Loader Component
+const SkeletonLoader = () => (
+  <div className="animate-pulse space-y-3">
+    <div className="h-6 bg-gray-200 rounded w-3/4"></div>
+    <div className="h-4 bg-gray-200 rounded w-1/2"></div>
+    <div className="h-4 bg-gray-200 rounded w-1/4"></div>
+  </div>
+);
+
+// Memoized Service Item
+const ServiceItem = memo(({ service, onDelete, deletingServiceId }) => {
+  return (
+    <CSSTransition key={service.id} timeout={300} classNames="fade">
+      <div className="flex justify-between items-center py-3 border-b border-gray-200 hover:bg-gray-100 transition-colors">
+        <div>
+          <h3 className="text-base font-medium text-gray-900">
+            {service.title || "Untitled"}
+          </h3>
+          <p className="text-sm text-gray-600">KSh {service.price || "N/A"}</p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Link
+            to={`/services`}
+            className="text-cyan-400 text-sm flex items-center gap-1 hover:text-cyan-500 transition-colors"
+            aria-label={`View ${service.title || "service"} details`}
+          >
+            View <FaChevronRight size={12} />
+          </Link>
+          <button
+            onClick={() => onDelete(service.id)}
+            className="flex items-center gap-1 px-2 py-1 bg-red-500 text-white text-sm font-medium rounded-md hover:bg-red-600 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+            disabled={deletingServiceId === service.id}
+            aria-label={`Delete ${service.title || "service"}`}
+          >
+            {deletingServiceId === service.id ? (
+              <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+            ) : (
+              <FaTrash size={12} />
+            )}
+          </button>
+        </div>
+      </div>
+    </CSSTransition>
+  );
+});
+
 function Dashboard() {
+  const navigate = useNavigate();
   const {
     token,
     services,
@@ -25,7 +76,6 @@ function Dashboard() {
     user,
     isLoading,
     setLoading,
-    setToken,
     refreshUser,
     fetchServices,
     fetchUserServices,
@@ -34,6 +84,8 @@ function Dashboard() {
     fetchSellerOrders,
     fetchConversations,
     clear,
+    updateOrderStatusApi,
+    deleteService,
   } = useStore();
 
   const [snack, setSnack] = useState({
@@ -41,85 +93,92 @@ function Dashboard() {
     message: "",
     type: "info",
   });
-  const [showForm, setShowForm] = useState(false);
-  const [localLoading, setLocalLoading] = useState(true);
   const [showChat, setShowChat] = useState(false);
   const [selectedSeller, setSelectedSeller] = useState(null);
+  const [collapsedSections, setCollapsedSections] = useState({
+    services: false,
+    newOrders: false,
+    yourOrders: false,
+    history: false,
+  });
+  const [deletingServiceId, setDeletingServiceId] = useState(null);
+  const [isDataReady, setIsDataReady] = useState(false); // New state to track data readiness
 
-  const initialSellerForm = useMemo(
-    () => ({
-      name: user?.name || "",
-      phone: user?.phone || "",
-      location: "",
-      gender: "",
-      profilePhoto: null,
-    }),
-    [user]
-  );
-  const [sellerForm, setSellerForm] = useState(initialSellerForm);
-
-  const navigate = useNavigate();
+  const formatTimestamp = (dateString) => {
+    if (!dateString) return "N/A";
+    const date = new Date(dateString);
+    return date.toLocaleString("en-US", {
+      year: "numeric",
+      month: "short",
+      day: "numeric",
+      hour: "numeric",
+      minute: "2-digit",
+      hour12: true,
+    });
+  };
 
   const loadData = useCallback(async () => {
-    console.log(
-      "loadData called, token:",
-      token ? token.substring(0, 10) + "..." : "null"
-    );
     if (!token) {
-      console.log("No token, clearing state and navigating to login");
+      setSnack({
+        show: true,
+        message: "No session found. Please log in.",
+        type: "error",
+      });
+      setTimeout(() => setSnack({ show: false, message: "", type: "info" }), 2000);
       clear();
       navigate("/login", { replace: true });
       return;
     }
 
     setLoading(true);
-    setLocalLoading(true);
+    setIsDataReady(false); // Reset data readiness
 
     try {
-      console.log("Validating token");
-      const user = await validateToken(token);
-      if (!user) {
-        console.log("Token invalid, clearing state and navigating to login");
+      const userData = await validateToken(token);
+      if (!userData) {
         setSnack({
           show: true,
           message: "Invalid session. Please log in again.",
           type: "error",
         });
+        setTimeout(() => setSnack({ show: false, message: "", type: "info" }), 2000);
         clear();
         navigate("/login", { replace: true });
         return;
       }
 
-      console.log("Refreshing user data");
-      await refreshUser(token);
+      await refreshUser();
       const currentUser = useStore.getState().user;
-      const role = currentUser?.role?.toLowerCase();
-      console.log("Current user role:", role);
+      const role = currentUser?.role?.toLowerCase() || "buyer";
 
-      const loaders = [fetchServices(token)];
+      const loaders = [fetchServices()];
       if (role === "buyer" || role === "both") {
-        loaders.push(fetchOrders(token));
+        loaders.push(fetchOrders());
       }
       if (role === "seller" || role === "both") {
-        loaders.push(fetchUserServices(token), fetchSellerOrders(token));
-        setTimeout(async () => {
-          try {
-            console.log("Fetching conversations");
-            await fetchConversations(token);
-          } catch (error) {
-            console.error("Fetch conversations error:", error);
-            setSnack({
-              show: true,
-              message: "Failed to load conversations",
-              type: "error",
-            });
-          }
-        }, 1000);
+        loaders.push(fetchUserServices(), fetchSellerOrders());
       }
 
-      console.log("Executing loaders:", loaders.length);
       await Promise.all(loaders);
-      console.log("loadData completed successfully");
+
+      // Defer conversations fetch
+      setTimeout(async () => {
+        try {
+          await fetchConversations();
+        } catch (error) {
+          console.error("Conversation fetch error:", error);
+          setSnack({
+            show: true,
+            message: "Failed to load conversations",
+            type: "error",
+          });
+          setTimeout(() => setSnack({ show: false, message: "", type: "info" }), 2000);
+        }
+      }, 2000);
+
+      // Introduce a slight delay to ensure skeleton loaders persist
+      await new Promise((resolve) => setTimeout(resolve, 300));
+      setIsDataReady(true); // Mark data as ready
     } catch (error) {
       console.error("Load data error:", error);
       setSnack({
@@ -127,9 +186,10 @@ function Dashboard() {
         message: "Failed to load data. Please try again.",
         type: "error",
       });
+      setTimeout(() => setSnack({ show: false, message: "", type: "info" }), 2000);
+      navigate("/login", { replace: true });
     } finally {
       setLoading(false);
-      setLocalLoading(false);
     }
   }, [
     token,
@@ -141,77 +201,76 @@ function Dashboard() {
     fetchOrders,
     fetchSellerOrders,
     fetchConversations,
+    setLoading,
+    validateToken,
   ]);
 
   useEffect(() => {
-    console.log("Dashboard useEffect triggered");
     loadData();
   }, [loadData]);
 
-  const handleBecomeSeller = useCallback(async () => {
-    try {
-      setLocalLoading(true);
-      const formData = new FormData();
-      Object.entries(sellerForm).forEach(([key, value]) => {
-        if (value) formData.append(key, value);
-      });
-
-      const response = await api.post("/api/become-seller", formData);
-      const data = response.data;
-
-      if (data.accessToken) {
-        await setToken(
-          data.accessToken,
-          data.user,
-          localStorage.getItem("refreshToken")
-        );
-      }
-
-      await refreshUser(data.accessToken || token);
-      setSnack({
-        show: true,
-        message: "You are now a seller! Start adding your services.",
-        type: "success",
-      });
-      setShowForm(false);
-      navigate("/add-service");
-    } catch (error) {
-      console.error("Become seller error:", error);
-      setSnack({
-        show: true,
-        message: error.response?.data?.error || "Failed to become a seller",
-        type: "error",
-      });
-    } finally {
-      setLocalLoading(false);
-    }
-  }, [sellerForm, token, setToken, refreshUser, navigate]);
-
   const handleOrderUpdate = useCallback(
     async (orderId, status) => {
+      if (!updateOrderStatusApi) {
+        console.error("updateOrderStatusApi is not defined in store");
+        setSnack({
+          show: true,
+          message: "Order update functionality is unavailable",
+          type: "error",
+        });
+        setTimeout(() => setSnack({ show: false, message: "", type: "info" }), 2000);
+        return;
+      }
       try {
-        setLocalLoading(true);
-        await useStore.getState().updateOrderStatusApi(orderId, status);
+        await updateOrderStatusApi(orderId, status);
         setSnack({
           show: true,
           message: "Order updated successfully!",
           type: "success",
         });
-        await fetchSellerOrders(token);
+        setTimeout(() => setSnack({ show: false, message: "", type: "info" }), 2000);
+        await fetchSellerOrders();
       } catch (error) {
         console.error("Order update error:", error);
         setSnack({
           show: true,
           message:
-            error.response?.data?.error ||
-            `Failed to update order to ${status.toLowerCase()}`,
+            error.response?.data?.error || `Failed to update order to ${status.toLowerCase()}`,
           type: "error",
         });
-      } finally {
-        setLocalLoading(false);
+        setTimeout(() => setSnack({ show: false, message: "", type: "info" }), 2000);
       }
     },
-    [token, fetchSellerOrders]
+    [fetchSellerOrders, updateOrderStatusApi]
+  );
+
+  const handleDeleteService = useCallback(
+    async (serviceId) => {
+      if (!window.confirm("Are you sure you want to delete this service?")) {
+        return;
+      }
+      try {
+        setDeletingServiceId(serviceId);
+        await deleteService(serviceId);
+        setSnack({
+          show: true,
+          message: "Service deleted successfully!",
+          type: "success",
+        });
+        setTimeout(() => setSnack({ show: false, message: "", type: "info" }), 2000);
+      } catch (error) {
+        console.error("Delete service error:", error);
+        setSnack({
+          show: true,
+          message: error.response?.data?.error || "Failed to delete service",
+          type: "error",
+        });
+        setTimeout(() => setSnack({ show: false, message: "", type: "info" }), 2000);
+      } finally {
+        setDeletingServiceId(null);
+      }
+    },
+    [deleteService]
   );
 
   const openChat = useCallback((seller) => {
@@ -221,9 +280,14 @@ function Dashboard() {
         message: "Cannot open chat: Seller ID is missing",
         type: "error",
       });
+      setTimeout(() => setSnack({ show: false, message: "", type: "info" }), 2000);
       return;
     }
-    setSelectedSeller(seller);
+    setSelectedSeller({
+      id: seller.id,
+      name: seller.name,
+      image: seller.image || null,
+    });
     setShowChat(true);
   }, []);
 
@@ -231,425 +295,225 @@ function Dashboard() {
     navigate("/orders");
   }, [navigate]);
 
-  const styles = {
-    container: {
-      minHeight: "100vh",
-      backgroundColor: "#f8f9fa",
-      padding: "2rem 1rem",
-    },
-    content: {
-      maxWidth: "1200px",
-      margin: "0 auto",
-    },
-    header: {
-      display: "flex",
-      flexDirection: "column",
-      gap: "1rem",
-      marginBottom: "2rem",
-    },
-    userInfo: {
-      display: "flex",
-      flexDirection: "column",
-    },
-    title: {
-      fontSize: "1.75rem",
-      fontWeight: "700",
-      color: "#1a237e",
-      margin: "0",
-    },
-    subtitle: {
-      fontSize: "1rem",
-      color: "#666",
-      margin: "0.25rem 0 0 0",
-    },
-    actionButtons: {
-      display: "flex",
-      gap: "1rem",
-      flexWrap: "wrap",
-    },
-    button: {
-      padding: "0.75rem 1.5rem",
-      borderRadius: "8px",
-      fontSize: "0.9rem",
-      fontWeight: "600",
-      cursor: "pointer",
-      transition: "all 0.3s ease",
-      display: "flex",
-      alignItems: "center",
-      gap: "0.5rem",
-      border: "none",
-    },
-    buttonPrimary: {
-      backgroundColor: "#1a237e",
-      color: "white",
-    },
-    buttonSecondary: {
-      backgroundColor: "#4fc3f7",
-      color: "white",
-    },
-    dashboardGrid: {
-      display: "grid",
-      gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))",
-      gap: "1.5rem",
-      marginBottom: "2rem",
-    },
-    card: {
-      backgroundColor: "white",
-      borderRadius: "12px",
-      padding: "1.5rem",
-      boxShadow: "0 4px 12px rgba(0,0,0,0.05)",
-      height: "100%",
-      transition: "transform 0.3s ease, box-shadow 0.3s ease",
-      ":hover": {
-        transform: "translateY(-5px)",
-        boxShadow: "0 8px 20px rgba(0,0,0,0.1)",
-      },
-    },
-    sectionTitle: {
-      fontSize: "1.25rem",
-      fontWeight: "600",
-      color: "#1a237e",
-      marginBottom: "1.5rem",
-      display: "flex",
-      alignItems: "center",
-      gap: "0.75rem",
-    },
-    serviceItem: {
-      display: "flex",
-      justifyContent: "space-between",
-      alignItems: "center",
-      padding: "1rem 0",
-      borderBottom: "1px solid #eee",
-      transition: "background-color 0.2s ease",
-      ":hover": {
-        backgroundColor: "#f8f9fa",
-      },
-    },
-    orderItem: {
-      padding: "1rem 0",
-      borderBottom: "1px solid #eee",
-      transition: "background-color 0.2s ease",
-      ":hover": {
-        backgroundColor: "#f8f9fa",
-      },
-    },
-    statusBadge: (status) => ({
-      backgroundColor:
-        status === "PENDING"
-          ? "#fff3e0"
-          : status === "ACCEPTED" || status === "COMPLETED"
-          ? "#e8f5e9"
-          : status === "REJECTED"
-          ? "#ffebee"
-          : "#f5f5f5",
-      color:
-        status === "PENDING"
-          ? "#ff8f00"
-          : status === "ACCEPTED" || status === "COMPLETED"
-          ? "#2e7d32"
-          : status === "REJECTED"
-          ? "#c62828"
-          : "#666",
-      padding: "0.25rem 0.5rem",
-      borderRadius: "4px",
-      fontSize: "0.75rem",
-      fontWeight: "600",
-      display: "inline-block",
-    }),
-    emptyState: {
-      color: "#666",
-      fontSize: "0.9rem",
-      textAlign: "center",
-      padding: "1.5rem",
-    },
-    viewAllButton: {
-      color: "#1a237e",
-      fontSize: "0.9rem",
-      fontWeight: "500",
-      background: "none",
-      border: "none",
-      cursor: "pointer",
-      display: "flex",
-      alignItems: "center",
-      gap: "0.25rem",
-      marginTop: "1rem",
-      marginLeft: "auto",
-    },
-    actionButtonGroup: {
-      display: "flex",
-      gap: "0.5rem",
-      justifyContent: "flex-end",
-      marginTop: "0.5rem",
-    },
-    smallButton: {
-      padding: "0.375rem 0.75rem",
-      fontSize: "0.75rem",
-      borderRadius: "6px",
-    },
-    snack: {
-      padding: "1rem",
-      borderRadius: "8px",
-      marginBottom: "1.5rem",
-      fontSize: "0.9rem",
-      display: "flex",
-      justifyContent: "space-between",
-      alignItems: "center",
-    },
-    snackSuccess: {
-      backgroundColor: "#d4edda",
-      color: "#155724",
-    },
-    snackError: {
-      backgroundColor: "#ffebee",
-      color: "#c62828",
-    },
-    formInput: {
-      width: "100%",
-      padding: "0.75rem 1rem",
-      border: "1px solid #ddd",
-      borderRadius: "8px",
-      fontSize: "0.9rem",
-      marginBottom: "1rem",
-    },
-    formLabel: {
-      display: "block",
-      marginBottom: "0.5rem",
-      fontWeight: "500",
-      color: "#444",
-    },
-    formGrid: {
-      display: "grid",
-      gridTemplateColumns: "1fr 1fr",
-      gap: "1rem",
-      "@media (max-width: 600px)": {
-        gridTemplateColumns: "1fr",
-      },
-    },
-    loadingSpinner: {
-      border: "4px solid #f3f3f3",
-      borderTop: "4px solid #1a237e",
-      borderRadius: "50%",
-      width: "40px",
-      height: "40px",
-      animation: "spin 1s linear infinite",
-      margin: "2rem auto",
-    },
-    "@media (max-width: 768px)": {
-      container: {
-        padding: "1.5rem 1rem",
-      },
-      dashboardGrid: {
-        gridTemplateColumns: "1fr",
-      },
-      card: {
-        padding: "1.25rem",
-      },
-    },
-    "@media (max-width: 480px)": {
-      title: {
-        fontSize: "1.5rem",
-      },
-      subtitle: {
-        fontSize: "0.9rem",
-      },
-      button: {
-        padding: "0.6rem 1rem",
-        fontSize: "0.8rem",
-      },
-    },
-  };
+  const toggleSection = useCallback((section) => {
+    setCollapsedSections((prev) => ({ ...prev, [section]: !prev[section] }));
+  }, []);
 
   return (
-    <div style={styles.container}>
-      <div style={styles.content}>
-        {(isLoading || localLoading) && (
-          <div style={styles.loadingSpinner}>
-            <style>{`@keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }`}</style>
+    <div className="min-h-screen bg-gray-50 py-12 px-4 sm:px-6 lg:px-8 font-inter transition-opacity duration-300">
+      <div className="max-w-7xl mx-auto">
+        <header className="mb-8">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            <div>
+              {isLoading || !isDataReady || !user ? (
+                <div className="animate-pulse">
+                  <div className="h-8 bg-gray-200 rounded w-1/2 mb-3"></div>
+                  <div className="h-4 bg-gray-200 rounded w-1/4"></div>
+                </div>
+              ) : (
+                <>
+                  <h1 className="text-2xl sm:text-3xl font-semibold text-gray-900 mt-5">
+                    Welcome, {user?.name || "User"}
+                  </h1>
+                  <p className="text-sm text-gray-600 mt-3">
+                    {user?.role?.toLowerCase() === "both"
+                      ? "Buyer & Seller Account"
+                      : user?.role
+                      ? `${user.role.charAt(0).toUpperCase() + user.role.slice(1).toLowerCase()} Account`
+                      : "Account"}
+                  </p>
+                </>
+              )}
+            </div>
+            <div className="flex flex-wrap gap-3 mt-5">
+              {isLoading || !isDataReady || !user ? (
+                <div className="animate-pulse flex gap-3">
+                  <div className="h-10 bg-gray-200 rounded w-32"></div>
+                  <div className="h-10 bg-gray-200 rounded w-32"></div>
+                </div>
+              ) : (
+                <>
+                  <button
+                    onClick={() => navigate("/services")}
+                    className="flex items-center gap-2 px-4 py-2 bg-cyan-400 text-gray-900 font-medium rounded-md hover:bg-cyan-500 hover:shadow-md transition-colors text-sm"
+                    aria-label="Explore services"
+                  >
+                    <FaSearch /> Explore Services
+                  </button>
+                  {(user?.isSeller || user?.role?.toLowerCase() === "both") && (
+                    <button
+                      onClick={() => navigate("/add-service")}
+                      className="flex items-center gap-2 px-4 py-2 bg-cyan-400 text-gray-900 font-medium rounded-md hover:bg-cyan-500 hover:shadow-md transition-colors text-sm"
+                      aria-label="Add service"
+                    >
+                      <FaPlus /> Add Service
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
+        </header>
+
+        {snack.show && (
+          <div
+            className={`fixed top-4 right-4 max-w-sm p-3 rounded-md text-sm flex items-center gap-2 animate-fadeInUp z-50 ${
+              snack.type === "success" ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
+            }`}
+          >
+            <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
+              {snack.type === "success" ? (
+                <path
+                  fillRule="evenodd"
+                  d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                  clipRule="evenodd"
+                />
+              ) : (
+                <path
+                  fillRule="evenodd"
+                  d="M10 18a8 8 0 100-16 8 8 0 000 16zM8.707 7.293a1 1 0 00-1.414 1.414L8.586 10l-1.293 1.293a1 1 0 101.414 1.414L10 11.414l1.293 1.293a1 1 0 001.414-1.414L11.414 10l1.293-1.293a1 1 0 00-1.414-1.414L10 8.586 8.707 7.293z"
+                  clipRule="evenodd"
+                />
+              )}
+            </svg>
+            {snack.message}
+            <button
+              onClick={() => setSnack({ show: false, message: "", type: "info" })}
+              className="ml-auto text-sm font-medium hover:underline"
+              aria-label="Close notification"
+            >
+              Close
+            </button>
           </div>
         )}
 
-        {!isLoading && !localLoading && user && (
-          <>
-            <div style={styles.header}>
-              <div style={styles.userInfo}>
-                <h1 style={styles.title}>Welcome, {user.name}</h1>
-                <p style={styles.subtitle}>
-                  {user.role.toLowerCase() === "both"
-                    ? "Buyer & Seller Account"
-                    : `${
-                        user.role.charAt(0).toUpperCase() +
-                        user.role.slice(1).toLowerCase()
-                      } Account`}
-                </p>
-              </div>
-              <div style={styles.actionButtons}>
-                <button
-                  onClick={() => navigate("/services")}
-                  style={{ ...styles.button, ...styles.buttonSecondary }}
-                >
-                  <FaSearch /> Explore Services
-                </button>
-                {(user.isSeller || user.role.toLowerCase() === "both") && (
-                  <button
-                    onClick={() => navigate("/add-service")}
-                    style={{ ...styles.button, ...styles.buttonPrimary }}
-                  >
-                    <FaPlus /> Add Service
-                  </button>
-                )}
-              </div>
-            </div>
-
-            {snack.show && (
-              <div
-                style={{
-                  ...styles.snack,
-                  ...(snack.type === "success"
-                    ? styles.snackSuccess
-                    : styles.snackError),
-                }}
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+          {(user?.isSeller || user?.role?.toLowerCase() === "both") && (
+            <section className="bg-white rounded-lg p-6 shadow-sm border border-gray-200">
+              <button
+                onClick={() => toggleSection("services")}
+                className="flex items-center justify-between w-full mb-4 focus:outline-none focus:ring-2 focus:ring-cyan-400 rounded"
+                aria-expanded={!collapsedSections.services}
+                aria-controls="services-section"
               >
-                <span>{snack.message}</span>
-                <button
-                  onClick={() => setSnack({ ...snack, show: false })}
-                  style={{
-                    background: "none",
-                    border: "none",
-                    color: "inherit",
-                    cursor: "pointer",
-                    fontSize: "14px",
-                    fontWeight: "600",
-                  }}
-                >
-                  Close
-                </button>
-              </div>
-            )}
-
-            <div style={styles.dashboardGrid}>
-              {/* Your Services Card */}
-              {(user.isSeller || user.role.toLowerCase() === "both") && (
-                <div style={styles.card}>
-                  <h2 style={styles.sectionTitle}>
-                    <FaTools /> Your Services
-                  </h2>
-                  {userServices && userServices.length > 0 ? (
-                    <div>
-                      {userServices.slice(0, 4).map((service) => (
-                        <div key={service.id} style={styles.serviceItem}>
-                          <div>
-                            <h3
-                              style={{
-                                fontSize: "1rem",
-                                fontWeight: "500",
-                                marginBottom: "0.25rem",
-                              }}
-                            >
-                              {service.title}
-                            </h3>
-                            <p style={{ fontSize: "0.875rem", color: "#666" }}>
-                              KSh {service.price}
-                            </p>
-                          </div>
-                          <Link
-                            to={`/services/${service.category}`}
-                            style={{
-                              color: "#4fc3f7",
-                              fontSize: "0.875rem",
-                              display: "flex",
-                              alignItems: "center",
-                              gap: "0.25rem",
-                            }}
-                          >
-                            View <FaChevronRight size={12} />
-                          </Link>
-                        </div>
-                      ))}
-                      {userServices.length > 4 && (
-                        <button
-                          onClick={() => navigate("/dashboard/services")}
-                          style={styles.viewAllButton}
-                        >
-                          View all ({userServices.length}){" "}
-                          <FaChevronRight size={12} />
-                        </button>
-                      )}
+                <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                  <FaTools className="text-cyan-400" /> Your Services
+                </h2>
+                {collapsedSections.services ? (
+                  <FaChevronDown className="text-gray-600" />
+                ) : (
+                  <FaChevronUp className="text-gray-600" />
+                )}
+              </button>
+              <CSSTransition in={!collapsedSections.services} timeout={300} classNames="slide" unmountOnExit>
+                <div id="services-section">
+                  {isLoading || !isDataReady || !userServices ? (
+                    <div className="space-y-3">
+                      <SkeletonLoader />
+                      <SkeletonLoader />
                     </div>
+                  ) : userServices.length > 0 ? (
+                    <TransitionGroup>
+                      {userServices.slice(0, 4).map((service) => (
+                        <ServiceItem
+                          key={service.id}
+                          service={service}
+                          onDelete={handleDeleteService}
+                          deletingServiceId={deletingServiceId}
+                        />
+                      ))}
+                    </TransitionGroup>
                   ) : (
-                    <p style={styles.emptyState}>
+                    <p className="text-sm text-gray-600 text-center py-4">
                       No services added yet.{" "}
-                      <Link to="/add-service" style={{ color: "#1a237e" }}>
+                      <Link to="/add-service" className="text-cyan-400 hover:text-cyan-500">
                         Add a service
                       </Link>
                       .
                     </p>
                   )}
+                  {userServices?.length > 4 && (
+                    <button
+                      onClick={() => navigate("/dashboard/services")}
+                      className="text-cyan-400 text-sm font-medium flex items-center gap-1 mt-4 ml-auto hover:text-cyan-500 transition-colors"
+                      aria-label="View all services"
+                    >
+                      View all ({userServices.length}) <FaChevronRight size={12} />
+                    </button>
+                  )}
                 </div>
-              )}
+              </CSSTransition>
+            </section>
+          )}
 
-              {/* New Orders Card */}
-              {(user.isSeller || user.role.toLowerCase() === "both") && (
-                <div style={styles.card}>
-                  <h2 style={styles.sectionTitle}>
-                    <FaShoppingCart /> New Orders
-                  </h2>
-                  {sellerOrders?.newOrders?.length > 0 ? (
+          {(user?.isSeller || user?.role?.toLowerCase() === "both") && (
+            <section className="bg-white rounded-lg p-6 shadow-sm border border-gray-200">
+              <button
+                onClick={() => toggleSection("newOrders")}
+                className="flex items-center justify-between w-full mb-4 focus:outline-none focus:ring-2 focus:ring-cyan-400 rounded"
+                aria-expanded={!collapsedSections.newOrders}
+                aria-controls="new-orders-section"
+              >
+                <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                  <FaShoppingCart className="text-cyan-400" /> New Orders
+                </h2>
+                {collapsedSections.newOrders ? (
+                  <FaChevronDown className="text-gray-600" />
+                ) : (
+                  <FaChevronUp className="text-gray-600" />
+                )}
+              </button>
+              <CSSTransition in={!collapsedSections.newOrders} timeout={300} classNames="slide" unmountOnExit>
+                <div id="new-orders-section">
+                  {isLoading || !isDataReady || !sellerOrders?.newOrders ? (
+                    <div className="space-y-3">
+                      <SkeletonLoader />
+                      <SkeletonLoader />
+                    </div>
+                  ) : sellerOrders.newOrders.length > 0 ? (
                     <div>
                       {sellerOrders.newOrders.slice(0, 4).map((order) => (
-                        <div key={order.id} style={styles.orderItem}>
-                          <div
-                            style={{
-                              display: "flex",
-                              justifyContent: "space-between",
-                              alignItems: "center",
-                            }}
-                          >
+                        <div
+                          key={order.id}
+                          className="py-3 border-b border-gray-200 hover:bg-gray-100 transition-colors"
+                        >
+                          <div className="flex justify-between items-center">
                             <div>
-                              <p
-                                style={{
-                                  fontSize: "0.9375rem",
-                                  fontWeight: "500",
-                                  marginBottom: "0.25rem",
-                                }}
-                              >
-                                Order #{order.id.slice(0, 8)}
+                              <p className="text-base font-medium text-gray-900">
+                                Order #{order.id?.slice(0, 8) || "N/A"}
                               </p>
-                              <p
-                                style={{ fontSize: "0.875rem", color: "#666" }}
-                              >
-                                {order.serviceTitle || "Unknown"}
-                              </p>
+                              <p className="text-sm text-gray-600">{order.serviceTitle || "Unknown"}</p>
+                              <p className="text-xs text-gray-500">{formatTimestamp(order.createdAt)}</p>
                             </div>
-                            <span style={styles.statusBadge(order.status)}>
-                              {order.status}
+                            <span
+                              className={`px-2 py-1 rounded text-xs font-semibold ${
+                                order.status === "PENDING"
+                                  ? "bg-orange-100 text-orange-600"
+                                  : order.status === "ACCEPTED" || order.status === "COMPLETED"
+                                  ? "bg-green-100 text-green-600"
+                                  : order.status === "REJECTED"
+                                  ? "bg-red-100 text-red-600"
+                                  : "bg-gray-100 text-gray-600"
+                              }`}
+                            >
+                              {order.status || "Unknown"}
                             </span>
                           </div>
                           {order.status === "PENDING" && (
-                            <div style={styles.actionButtonGroup}>
+                            <div className="flex justify-end gap-2 mt-2">
                               <button
-                                onClick={() =>
-                                  handleOrderUpdate(order.id, "ACCEPTED")
-                                }
-                                style={{
-                                  ...styles.button,
-                                  ...styles.buttonPrimary,
-                                  ...styles.smallButton,
-                                }}
-                                disabled={localLoading}
+                                onClick={() => handleOrderUpdate(order.id, "ACCEPTED")}
+                                className="flex items-center gap-1 px-3 py-1 bg-cyan-400 text-gray-900 text-sm font-medium rounded-md hover:bg-cyan-500 hover:shadow-md disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+                                disabled={!order.id}
+                                aria-label="Accept order"
                               >
                                 <FaRegCheckCircle /> Accept
                               </button>
                               <button
-                                onClick={() =>
-                                  handleOrderUpdate(order.id, "REJECTED")
-                                }
-                                style={{
-                                  ...styles.button,
-                                  ...styles.smallButton,
-                                  backgroundColor: "#f44336",
-                                  color: "white",
-                                }}
-                                disabled={localLoading}
+                                onClick={() => handleOrderUpdate(order.id, "REJECTED")}
+                                className="flex items-center gap-1 px-3 py-1 bg-red-500 text-white text-sm font-medium rounded-md hover:bg-red-600 hover:shadow-md disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+                                disabled={!order.id}
+                                aria-label="Reject order"
                               >
                                 <FaRegTimesCircle /> Reject
                               </button>
@@ -660,198 +524,207 @@ function Dashboard() {
                       {sellerOrders.newOrders.length > 4 && (
                         <button
                           onClick={handleViewAllOrders}
-                          style={styles.viewAllButton}
+                          className="text-cyan-400 text-sm font-medium flex items-center gap-1 mt-4 ml-auto hover:text-cyan-500 transition-colors"
+                          aria-label="View all new orders"
                         >
-                          View all ({sellerOrders.newOrders.length}){" "}
-                          <FaChevronRight size={12} />
+                          View all ({sellerOrders.newOrders.length}) <FaChevronRight size={12} />
                         </button>
                       )}
                     </div>
                   ) : (
-                    <p style={styles.emptyState}>No new orders to deliver</p>
+                    <p className="text-sm text-gray-600 text-center py-4">No new orders to deliver</p>
                   )}
                 </div>
-              )}
+              </CSSTransition>
+            </section>
+          )}
 
-              {/* Your Orders Card (for buyers) */}
-              {(user.role.toLowerCase() === "buyer" ||
-                user.role.toLowerCase() === "both") && (
-                <div style={styles.card}>
-                  <h2 style={styles.sectionTitle}>
-                    <FaShoppingCart /> Your Orders
-                  </h2>
-                  {orders && orders.length > 0 ? (
+          {(user?.role?.toLowerCase() === "buyer" || user?.role?.toLowerCase() === "both") && (
+            <section className="bg-white rounded-lg p-6 shadow-sm border border-gray-200">
+              <button
+                onClick={() => toggleSection("yourOrders")}
+                className="flex items-center justify-between w-full mb-4 focus:outline-none focus:ring-2 focus:ring-cyan-400 rounded"
+                aria-expanded={!collapsedSections.yourOrders}
+                aria-controls="your-orders-section"
+              >
+                <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                  <FaShoppingCart className="text-cyan-400" /> Your Orders
+                </h2>
+                {collapsedSections.yourOrders ? (
+                  <FaChevronDown className="text-gray-600" />
+                ) : (
+                  <FaChevronUp className="text-gray-600" />
+                )}
+              </button>
+              <CSSTransition in={!collapsedSections.yourOrders} timeout={300} classNames="slide" unmountOnExit>
+                <div id="your-orders-section">
+                  {isLoading || !isDataReady || !orders ? (
+                    <div className="space-y-3">
+                      <SkeletonLoader />
+                      <SkeletonLoader />
+                    </div>
+                  ) : orders.length > 0 ? (
                     <div>
                       {orders
                         .filter((order) => order.role === "BUYER")
                         .slice(0, 4)
                         .map((order) => (
-                          <div key={order.id} style={styles.orderItem}>
-                            <div
-                              style={{
-                                display: "flex",
-                                justifyContent: "space-between",
-                                alignItems: "center",
-                              }}
-                            >
+                          <div
+                            key={order.id}
+                            className="py-3 border-b border-gray-200 hover:bg-gray-100 transition-colors"
+                          >
+                            <div className="flex justify-between items-center">
                               <div>
-                                <p
-                                  style={{
-                                    fontSize: "0.9375rem",
-                                    fontWeight: "500",
-                                    marginBottom: "0.25rem",
-                                  }}
-                                >
-                                  Order #{order.id.slice(0, 8)}
+                                <p className="text-base font-medium text-gray-900">
+                                  Order #{order.id?.slice(0, 8) || "N/A"}
                                 </p>
-                                <p
-                                  style={{
-                                    fontSize: "0.875rem",
-                                    color: "#666",
-                                  }}
-                                >
-                                  {order.serviceTitle || "Unknown"}
-                                </p>
+                                <p className="text-sm text-gray-600">{order.serviceTitle || "Unknown"}</p>
+                                <p className="text-xs text-gray-500">{formatTimestamp(order.createdAt)}</p>
                               </div>
-                              <span style={styles.statusBadge(order.status)}>
-                                {order.status}
+                              <span
+                                className={`px-2 py-1 rounded text-xs font-semibold ${
+                                  order.status === "PENDING"
+                                    ? "bg-orange-100 text-orange-600"
+                                    : order.status === "ACCEPTED" || order.status === "COMPLETED"
+                                    ? "bg-green-100 text-green-600"
+                                    : order.status === "REJECTED"
+                                    ? "bg-red-100 text-red-600"
+                                    : "bg-gray-100 text-gray-600"
+                                }`}
+                              >
+                                {order.status || "Unknown"}
                               </span>
                             </div>
-                            <div style={styles.actionButtonGroup}>
+                            <div className="flex justify-end mt-2">
                               <button
                                 onClick={() =>
                                   openChat({
                                     id: order.sellerId,
                                     name: order.sellerName,
+                                    image: order.sellerImage || null,
                                   })
                                 }
-                                style={{
-                                  ...styles.button,
-                                  ...styles.buttonSecondary,
-                                  ...styles.smallButton,
-                                }}
-                                disabled={localLoading || !order.sellerId}
+                                className="flex items-center gap-1 px-3 py-1 bg-cyan-400 text-gray-900 text-sm font-medium rounded-md hover:bg-cyan-500 hover:shadow-md disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+                                disabled={!order.sellerId}
+                                aria-label="Chat with seller"
                               >
                                 Chat with Seller
                               </button>
                             </div>
                           </div>
                         ))}
-                      {orders.filter((order) => order.role === "BUYER").length >
-                        4 && (
+                      {orders.filter((order) => order.role === "BUYER").length > 4 && (
                         <button
                           onClick={handleViewAllOrders}
-                          style={styles.viewAllButton}
+                          className="text-cyan-400 text-sm font-medium flex items-center gap-1 mt-4 ml-auto hover:text-cyan-500 transition-colors"
+                          aria-label="View all orders"
                         >
-                          View all (
-                          {
-                            orders.filter((order) => order.role === "BUYER")
-                              .length
-                          }
-                          ) <FaChevronRight size={12} />
+                          View all ({orders.filter((order) => order.role === "BUYER").length}){" "}
+                          <FaChevronRight size={12} />
                         </button>
                       )}
                     </div>
                   ) : (
-                    <p style={styles.emptyState}>No orders placed yet</p>
+                    <p className="text-sm text-gray-600 text-center py-4">No orders placed yet</p>
                   )}
                 </div>
-              )}
+              </CSSTransition>
+            </section>
+          )}
 
-              {/* Become a Seller Card */}
-              {!(user.isSeller || user.role.toLowerCase() === "both") && (
-                <div style={styles.card}>
-                  <h2 style={styles.sectionTitle}>
-                    <FaUserTie /> Become a Seller
-                  </h2>
-                  <p
-                    style={{
-                      color: "#666",
-                      marginBottom: "1.25rem",
-                      fontSize: "0.9rem",
-                    }}
-                  >
-                    Start offering your services and earn money by joining our
-                    professional community.
-                  </p>
-                  <button
-                    onClick={() => setShowForm(true)}
-                    style={{ ...styles.button, ...styles.buttonPrimary }}
-                  >
-                    <FaStore /> Register as Seller
-                  </button>
-                </div>
-              )}
+          {!(user?.isSeller || user?.role?.toLowerCase() === "both") && (
+            <section className="bg-white rounded-lg p-6 shadow-sm border border-gray-200">
+              <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2 mb-4">
+                <FaUserTie className="text-cyan-400" /> Become a Seller
+              </h2>
+              <p className="text-sm text-gray-600 mb-4">
+                Start offering your services and earn money by joining our professional community.
+              </p>
+              <Link
+                to="/become-seller"
+                className="flex items-center gap-2 px-4 py-2 bg-cyan-400 text-gray-900 font-medium rounded-md hover:bg-cyan-500 hover:shadow-md transition-colors w-full sm:w-auto"
+                aria-label="Register as seller"
+              >
+                <FaStore /> Register as Seller
+              </Link>
+            </section>
+          )}
 
-              {/* Order History Card */}
-              {(user.role.toLowerCase() === "buyer" ||
-                user.role.toLowerCase() === "both" ||
-                user.isSeller ||
-                user.role.toLowerCase() === "seller") && (
-                <div style={styles.card}>
-                  <h2 style={styles.sectionTitle}>
-                    <FaHistory /> Order History
-                  </h2>
-                  {sellerOrders?.orderHistory?.length > 0 ||
-                  orders?.length > 0 ? (
+          {(user?.role?.toLowerCase() === "buyer" ||
+            user?.role?.toLowerCase() === "both" ||
+            user?.isSeller ||
+            user?.role?.toLowerCase() === "seller") && (
+            <section className="bg-white rounded-lg p-6 shadow-sm border border-gray-200">
+              <button
+                onClick={() => toggleSection("history")}
+                className="flex items-center justify-between w-full mb-4 focus:outline-none focus:ring-2 focus:ring-cyan-400 rounded"
+                aria-expanded={!collapsedSections.history}
+                aria-controls="history-section"
+              >
+                <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
+                  <FaHistory className="text-cyan-400" /> Order History
+                </h2>
+                {collapsedSections.history ? (
+                  <FaChevronDown className="text-gray-600" />
+                ) : (
+                  <FaChevronUp className="text-gray-600" />
+                )}
+              </button>
+              <CSSTransition in={!collapsedSections.history} timeout={300} classNames="slide" unmountOnExit>
+                <div id="history-section">
+                  {isLoading || !isDataReady || (!sellerOrders?.orderHistory && !orders) ? (
+                    <div className="space-y-3">
+                      <SkeletonLoader />
+                      <SkeletonLoader />
+                    </div>
+                  ) : (sellerOrders?.orderHistory || orders || []).length > 0 ? (
                     <div>
                       {[
-                        ...(user.isSeller || user.role.toLowerCase() === "both"
+                        ...(user?.isSeller || user?.role?.toLowerCase() === "both"
                           ? sellerOrders?.orderHistory || []
-                          : orders.filter((order) => order.role === "BUYER") ||
-                            []),
+                          : orders?.filter((order) => order.role === "BUYER") || []),
                       ]
                         .slice(0, 5)
                         .map((order) => (
-                          <div key={order.id} style={styles.orderItem}>
-                            <div
-                              style={{
-                                display: "flex",
-                                justifyContent: "space-between",
-                                alignItems: "center",
-                              }}
-                            >
+                          <div
+                            key={order.id}
+                            className="py-3 border-b border-gray-200 hover:bg-gray-100 transition-colors"
+                          >
+                            <div className="flex justify-between items-center">
                               <div>
-                                <p
-                                  style={{
-                                    fontSize: "0.9375rem",
-                                    fontWeight: "500",
-                                    marginBottom: "0.25rem",
-                                  }}
-                                >
-                                  Order #{order.id.slice(0, 8)}
+                                <p className="text-base font-medium text-gray-900">
+                                  Order #{order.id?.slice(0, 8) || "N/A"}
                                 </p>
-                                <p
-                                  style={{
-                                    fontSize: "0.875rem",
-                                    color: "#666",
-                                  }}
-                                >
-                                  {order.serviceTitle || "Unknown"}
-                                </p>
+                                <p className="text-sm text-gray-600">{order.serviceTitle || "Unknown"}</p>
+                                <p className="text-xs text-gray-500">{formatTimestamp(order.createdAt)}</p>
                               </div>
-                              <span style={styles.statusBadge(order.status)}>
-                                {order.status}
+                              <span
+                                className={`px-2 py-1 rounded text-xs font-semibold ${
+                                  order.status === "PENDING"
+                                    ? "bg-orange-100 text-orange-600"
+                                    : order.status === "ACCEPTED" || order.status === "COMPLETED"
+                                    ? "bg-green-100 text-green-600"
+                                    : order.status === "REJECTED"
+                                    ? "bg-red-100 text-red-600"
+                                    : "bg-gray-100 text-gray-600"
+                                }`}
+                              >
+                                {order.status || "Unknown"}
                               </span>
                             </div>
-                            {!(
-                              user.isSeller ||
-                              user.role.toLowerCase() === "both"
-                            ) && (
-                              <div style={styles.actionButtonGroup}>
+                            {!(user?.isSeller || user?.role?.toLowerCase() === "both") && (
+                              <div className="flex justify-end mt-2">
                                 <button
                                   onClick={() =>
                                     openChat({
                                       id: order.sellerId,
                                       name: order.sellerName,
+                                      image: order.sellerImage || null,
                                     })
                                   }
-                                  style={{
-                                    ...styles.button,
-                                    ...styles.buttonSecondary,
-                                    ...styles.smallButton,
-                                  }}
-                                  disabled={localLoading || !order.sellerId}
+                                  className="flex items-center gap-1 px-3 py-1 bg-cyan-400 text-gray-900 text-sm font-medium rounded-md hover:bg-cyan-500 hover:shadow-md disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+                                  disabled={!order.sellerId}
+                                  aria-label="Chat with seller"
                                 >
                                   Chat with Seller
                                 </button>
@@ -860,152 +733,34 @@ function Dashboard() {
                           </div>
                         ))}
                       {[
-                        ...(user.isSeller || user.role.toLowerCase() === "both"
+                        ...(user?.isSeller || user?.role?.toLowerCase() === "both"
                           ? sellerOrders?.orderHistory || []
-                          : orders.filter((order) => order.role === "BUYER") ||
-                            []),
+                          : orders?.filter((order) => order.role === "BUYER") || []),
                       ].length > 5 && (
                         <button
                           onClick={handleViewAllOrders}
-                          style={styles.viewAllButton}
+                          className="text-cyan-400 text-sm font-medium flex items-center gap-1 mt-4 ml-auto hover:text-cyan-500 transition-colors"
+                          aria-label="View all order history"
                         >
                           View all (
-                          {user.isSeller || user.role.toLowerCase() === "both"
+                          {user?.isSeller || user?.role?.toLowerCase() === "both"
                             ? sellerOrders?.orderHistory?.length || 0
-                            : orders.filter((order) => order.role === "BUYER")
-                                .length || 0}
+                            : orders?.filter((order) => order.role === "BUYER")?.length || 0}
                           ) <FaChevronRight size={12} />
                         </button>
                       )}
                     </div>
                   ) : (
-                    <p style={styles.emptyState}>No order history</p>
+                    <p className="text-sm text-gray-600 text-center py-4">No order history</p>
                   )}
                 </div>
-              )}
-            </div>
+              </CSSTransition>
+            </section>
+          )}
+        </div>
 
-            {/* Seller Registration Form */}
-            {showForm && (
-              <div style={{ ...styles.card, marginTop: "1.5rem" }}>
-                <h2 style={styles.sectionTitle}>Seller Registration</h2>
-                <form
-                  onSubmit={(e) => {
-                    e.preventDefault();
-                    handleBecomeSeller();
-                  }}
-                >
-                  <div>
-                    <label style={styles.formLabel}>Full Name</label>
-                    <input
-                      type="text"
-                      value={sellerForm.name}
-                      onChange={(e) =>
-                        setSellerForm({ ...sellerForm, name: e.target.value })
-                      }
-                      style={styles.formInput}
-                      required
-                    />
-                  </div>
-                  <div style={styles.formGrid}>
-                    <div>
-                      <label style={styles.formLabel}>Phone Number</label>
-                      <input
-                        type="tel"
-                        value={sellerForm.phone}
-                        onChange={(e) =>
-                          setSellerForm({
-                            ...sellerForm,
-                            phone: e.target.value,
-                          })
-                        }
-                        style={styles.formInput}
-                        required
-                      />
-                    </div>
-                    <div>
-                      <label style={styles.formLabel}>Location</label>
-                      <input
-                        type="text"
-                        value={sellerForm.location}
-                        onChange={(e) =>
-                          setSellerForm({
-                            ...sellerForm,
-                            location: e.target.value,
-                          })
-                        }
-                        style={styles.formInput}
-                        required
-                      />
-                    </div>
-                  </div>
-                  <div style={styles.formGrid}>
-                    <div>
-                      <label style={styles.formLabel}>Gender</label>
-                      <select
-                        value={sellerForm.gender}
-                        onChange={(e) =>
-                          setSellerForm({
-                            ...sellerForm,
-                            gender: e.target.value,
-                          })
-                        }
-                        style={styles.formInput}
-                        required
-                      >
-                        <option value="">Select</option>
-                        <option value="Male">Male</option>
-                        <option value="Female">Female</option>
-                        <option value="Other">Other</option>
-                      </select>
-                    </div>
-                    <div>
-                      <label style={styles.formLabel}>Profile Photo</label>
-                      <input
-                        type="file"
-                        onChange={(e) =>
-                          setSellerForm({
-                            ...sellerForm,
-                            profilePhoto: e.target.files[0],
-                          })
-                        }
-                        style={{ ...styles.formInput, padding: "0.5rem" }}
-                      />
-                    </div>
-                  </div>
-                  <div
-                    style={{ display: "flex", gap: "1rem", marginTop: "1rem" }}
-                  >
-                    <button
-                      type="submit"
-                      style={{ ...styles.button, ...styles.buttonPrimary }}
-                      disabled={localLoading}
-                    >
-                      {localLoading ? "Processing..." : "Submit Application"}
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setShowForm(false)}
-                      style={{
-                        ...styles.button,
-                        backgroundColor: "#666",
-                        color: "white",
-                      }}
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </form>
-              </div>
-            )}
-
-            {showChat && (
-              <ChatModal
-                seller={selectedSeller}
-                onClose={() => setShowChat(false)}
-              />
-            )}
-          </>
+        {showChat && selectedSeller && (
+          <ChatModal seller={selectedSeller} onClose={() => setShowChat(false)} />
         )}
       </div>
     </div>

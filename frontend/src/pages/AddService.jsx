@@ -1,5 +1,4 @@
-// frontend/src/AddService.jsx
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import useStore from "../store";
 
@@ -18,8 +17,9 @@ function AddService() {
     message: "",
     type: "info",
   });
+  const [errors, setErrors] = useState({});
+  const sectionRef = useRef(null);
 
-  // Categories from Services.jsx
   const serviceCategories = [
     { id: "plumbing", name: "Plumbing" },
     { id: "electrical", name: "Electrical" },
@@ -31,17 +31,64 @@ function AddService() {
     { id: "appliance", name: "Appliance Repair" },
   ];
 
+  useEffect(() => {
+    const observer = new IntersectionObserver(
+      (entries) => {
+        entries.forEach((entry) => {
+          if (entry.isIntersecting) {
+            entry.target.classList.add("animate-fade-in-up");
+            observer.unobserve(entry.target);
+          }
+        });
+      },
+      { threshold: 0.1 }
+    );
+
+    if (sectionRef.current) observer.observe(sectionRef.current);
+
+    return () => {
+      if (sectionRef.current) observer.unobserve(sectionRef.current);
+    };
+  }, []);
+
+  const validateForm = () => {
+    const newErrors = {};
+    if (!formData.category) newErrors.category = "Category is required";
+    if (!formData.title.trim()) newErrors.title = "Title is required";
+    if (!formData.description.trim())
+      newErrors.description = "Description is required";
+    if (formData.price && formData.price < 0)
+      newErrors.price = "Price cannot be negative";
+    if (formData.experience && formData.experience < 0)
+      newErrors.experience = "Experience cannot be negative";
+    setErrors(newErrors);
+    return Object.keys(newErrors).length === 0;
+  };
+
   const handleAddService = async (e) => {
     e.preventDefault();
-    console.log("Submitting service:", formData); // Debug log
+    if (!validateForm()) {
+      setSnack({
+        show: true,
+        message: "Please fix the errors in the form",
+        type: "error",
+      });
+      setTimeout(
+        () => setSnack({ show: false, message: "", type: "info" }),
+        2000
+      );
+      return;
+    }
+
+    console.log("Submitting service:", formData);
     try {
-      await addService(token, formData);
+      await addService(formData);
       setSnack({
         show: true,
         message: "Service added successfully!",
         type: "success",
       });
-      setTimeout(() => navigate("/dashboard"), 2000);
+      setTimeout(() => navigate("/dashboard"), 1000);
     } catch (error) {
       console.error("Add service error:", {
         message: error.message,
@@ -56,67 +103,83 @@ function AddService() {
           "Failed to add service. Please try again.",
         type: "error",
       });
+      setTimeout(
+        () => setSnack({ show: false, message: "", type: "info" }),
+        2000
+      );
+    }
+  };
+
+  const handleCancel = () => {
+    if (
+      formData.category ||
+      formData.title ||
+      formData.description ||
+      formData.experience ||
+      formData.price
+    ) {
+      if (window.confirm("Discard unsaved changes?")) {
+        navigate("/dashboard");
+      }
+    } else {
+      navigate("/dashboard");
     }
   };
 
   return (
-    <div
-      style={{
-        minHeight: "100vh",
-        display: "flex",
-        justifyContent: "center",
-        alignItems: "center",
-        background: "linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%)",
-        padding: "20px",
-      }}
-    >
+    <div className="min-h-screen bg-gray-100 flex items-center justify-center py-12 px-4 sm:px-6 lg:px-8 mt-8">
       <div
-        style={{
-          padding: "48px",
-          backgroundColor: "white",
-          borderRadius: "16px",
-          boxShadow: "0 8px 32px rgba(0,0,0,0.1)",
-          maxWidth: "600px",
-          width: "100%",
-        }}
+        ref={sectionRef}
+        className="w-full max-w-lg bg-white rounded-xl p-8 shadow-lg border border-gray-200  transition-all duration-500"
       >
-        <h1
-          style={{
-            fontSize: "28px",
-            fontWeight: "700",
-            color: "#1a237e",
-            marginBottom: "24px",
-            textAlign: "center",
-          }}
-        >
+        <h1 className="text-3xl font-bold text-gray-900 text-center mb-8">
           Add New Service
         </h1>
 
         {snack.show && (
           <div
-            style={{
-              backgroundColor: snack.type === "success" ? "#d4edda" : "#ffebee",
-              color: snack.type === "success" ? "#155724" : "#c62828",
-              padding: "12px 16px",
-              borderRadius: "8px",
-              marginBottom: "24px",
-              fontSize: "14px",
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-            }}
+            className={`p-4 rounded-lg mb-6 text-sm flex items-center gap-3 animate-slide-in-top ${
+              snack.type === "success"
+                ? "bg-green-50 text-green-800 border border-green-200"
+                : "bg-red-50 text-red-800 border border-red-200"
+            }`}
           >
-            <span>{snack.message}</span>
+            {snack.type === "success" ? (
+              <svg
+                className="w-6 h-6 animate-pulse"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="2"
+                  d="M5 13l4 4L19 7"
+                />
+              </svg>
+            ) : (
+              <svg
+                className="w-6 h-6"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth="2"
+                  d="M6 18L18 6M6 6l12 12"
+                />
+              </svg>
+            )}
+            <span className="font-medium">{snack.message}</span>
             <button
-              onClick={() => setSnack({ ...snack, show: false })}
-              style={{
-                background: "none",
-                border: "none",
-                color: "inherit",
-                cursor: "pointer",
-                fontSize: "14px",
-                fontWeight: "600",
-              }}
+              onClick={() =>
+                setSnack({ show: false, message: "", type: "info" })
+              }
+              className="ml-auto text-sm font-semibold hover:underline"
+              aria-label="Close notification"
             >
               Close
             </button>
@@ -124,44 +187,21 @@ function AddService() {
         )}
 
         {isLoading && (
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "center",
-              alignItems: "center",
-              height: "200px",
-            }}
-          >
-            <div
-              style={{
-                border: "4px solid #f3f3f3",
-                borderTop: "4px solid #1a237e",
-                borderRadius: "50%",
-                width: "40px",
-                height: "40px",
-                animation: "spin 1s linear infinite",
-              }}
-            ></div>
-            <style>{`
-              @keyframes spin {
-                0% { transform: rotate(0deg); }
-                100% { transform: rotate(360deg); }
-              }
-            `}</style>
+          <div className="flex flex-col items-center justify-center h-40 gap-4">
+            <div className="relative">
+              <div className="w-12 h-12 border-4 border-cyan-200 border-t-cyan-500 rounded-full animate-spin"></div>
+              <div className="absolute inset-0 w-8 h-8 border-4 border-cyan-200 border-t-cyan-400 rounded-full animate-spin animate-reverse"></div>
+            </div>
+            <p className="text-gray-600 font-medium animate-pulse">
+              Adding Service...
+            </p>
           </div>
         )}
 
         {!isLoading && (
           <form onSubmit={handleAddService}>
-            <div style={{ marginBottom: "16px" }}>
-              <label
-                style={{
-                  display: "block",
-                  marginBottom: "8px",
-                  fontWeight: "500",
-                  color: "#444",
-                }}
-              >
+            <div className="mb-6">
+              <label className="block text-sm font-semibold text-gray-700 mb-2">
                 Category
               </label>
               <select
@@ -169,15 +209,11 @@ function AddService() {
                 onChange={(e) =>
                   setFormData({ ...formData, category: e.target.value })
                 }
+                className={`w-full px-4 py-3 border ${
+                  errors.category ? "border-red-400" : "border-gray-200"
+                } rounded-lg text-gray-900 text-sm focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 bg-gray-50 hover:border-gray-300 transition-all duration-200`}
                 required
-                style={{
-                  width: "100%",
-                  padding: "14px 16px",
-                  border: "1px solid #ddd",
-                  borderRadius: "8px",
-                  fontSize: "16px",
-                  transition: "border-color 0.3s ease",
-                }}
+                aria-label="Service category"
               >
                 <option value="" disabled>
                   Select a category
@@ -188,16 +224,12 @@ function AddService() {
                   </option>
                 ))}
               </select>
+              {errors.category && (
+                <p className="text-red-500 text-xs mt-1.5">{errors.category}</p>
+              )}
             </div>
-            <div style={{ marginBottom: "16px" }}>
-              <label
-                style={{
-                  display: "block",
-                  marginBottom: "8px",
-                  fontWeight: "500",
-                  color: "#444",
-                }}
-              >
+            <div className="mb-6">
+              <label className="block text-sm font-semibold text-gray-700 mb-2">
                 Title
               </label>
               <input
@@ -207,26 +239,18 @@ function AddService() {
                 onChange={(e) =>
                   setFormData({ ...formData, title: e.target.value })
                 }
+                className={`w-full px-4 py-3 border ${
+                  errors.title ? "border-red-400" : "border-gray-200"
+                } rounded-lg text-gray-900 text-sm focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 bg-gray-50 hover:border-gray-300 transition-all duration-200`}
                 required
-                style={{
-                  width: "100%",
-                  padding: "14px 16px",
-                  border: "1px solid #ddd",
-                  borderRadius: "8px",
-                  fontSize: "16px",
-                  transition: "border-color 0.3s ease",
-                }}
+                aria-label="Service title"
               />
+              {errors.title && (
+                <p className="text-red-500 text-xs mt-1.5">{errors.title}</p>
+              )}
             </div>
-            <div style={{ marginBottom: "16px" }}>
-              <label
-                style={{
-                  display: "block",
-                  marginBottom: "8px",
-                  fontWeight: "500",
-                  color: "#444",
-                }}
-              >
+            <div className="mb-6">
+              <label className="block text-sm font-semibold text-gray-700 mb-2">
                 Description
               </label>
               <textarea
@@ -235,28 +259,20 @@ function AddService() {
                 onChange={(e) =>
                   setFormData({ ...formData, description: e.target.value })
                 }
+                className={`w-full px-4 py-3 border ${
+                  errors.description ? "border-red-400" : "border-gray-200"
+                } rounded-lg text-gray-900 text-sm focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 bg-gray-50 hover:border-gray-300 transition-all duration-200 resize-vertical min-h-[120px]`}
                 required
-                style={{
-                  width: "100%",
-                  padding: "14px 16px",
-                  border: "1px solid #ddd",
-                  borderRadius: "8px",
-                  fontSize: "16px",
-                  minHeight: "100px",
-                  resize: "vertical",
-                  transition: "border-color 0.3s ease",
-                }}
+                aria-label="Service description"
               />
+              {errors.description && (
+                <p className="text-red-500 text-xs mt-1.5">
+                  {errors.description}
+                </p>
+              )}
             </div>
-            <div style={{ marginBottom: "16px" }}>
-              <label
-                style={{
-                  display: "block",
-                  marginBottom: "8px",
-                  fontWeight: "500",
-                  color: "#444",
-                }}
-              >
+            <div className="mb-6">
+              <label className="block text-sm font-semibold text-gray-700 mb-2">
                 Experience (years)
               </label>
               <input
@@ -268,25 +284,19 @@ function AddService() {
                 }
                 min="0"
                 step="1"
-                style={{
-                  width: "100%",
-                  padding: "14px 16px",
-                  border: "1px solid #ddd",
-                  borderRadius: "8px",
-                  fontSize: "16px",
-                  transition: "border-color 0.3s ease",
-                }}
+                className={`w-full px-4 py-3 border ${
+                  errors.experience ? "border-red-400" : "border-gray-200"
+                } rounded-lg text-gray-900 text-sm focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 bg-gray-50 hover:border-gray-300 transition-all duration-200`}
+                aria-label="Years of experience"
               />
+              {errors.experience && (
+                <p className="text-red-500 text-xs mt-1.5">
+                  {errors.experience}
+                </p>
+              )}
             </div>
-            <div style={{ marginBottom: "16px" }}>
-              <label
-                style={{
-                  display: "block",
-                  marginBottom: "8px",
-                  fontWeight: "500",
-                  color: "#444",
-                }}
-              >
+            <div className="mb-6">
+              <label className="block text-sm font-semibold text-gray-700 mb-2">
                 From KSh
               </label>
               <input
@@ -296,61 +306,32 @@ function AddService() {
                 onChange={(e) =>
                   setFormData({ ...formData, price: e.target.value })
                 }
-                required
                 min="0"
                 step="0.01"
-                style={{
-                  width: "100%",
-                  padding: "14px 16px",
-                  border: "1px solid #ddd",
-                  borderRadius: "8px",
-                  fontSize: "16px",
-                  transition: "border-color 0.3s ease",
-                }}
+                className={`w-full px-4 py-3 border ${
+                  errors.price ? "border-red-400" : "border-gray-200"
+                } rounded-lg text-gray-900 text-sm focus:ring-2 focus:ring-cyan-500 focus:border-cyan-500 bg-gray-50 hover:border-gray-300 transition-all duration-200`}
+                required
+                aria-label="Service price"
               />
+              {errors.price && (
+                <p className="text-red-500 text-xs mt-1.5">{errors.price}</p>
+              )}
             </div>
-            <div style={{ display: "flex", gap: "16px" }}>
+            <div className="flex gap-4">
               <button
                 type="submit"
                 disabled={isLoading}
-                style={{
-                  padding: "12px 24px",
-                  backgroundColor: isLoading ? "#cccccc" : "#1a237e",
-                  color: "white",
-                  border: "none",
-                  borderRadius: "8px",
-                  fontSize: "15px",
-                  fontWeight: "600",
-                  cursor: isLoading ? "not-allowed" : "pointer",
-                  transition: "all 0.3s ease",
-                  flex: 1,
-                }}
-                onMouseOver={(e) =>
-                  !isLoading && (e.target.style.backgroundColor = "#283593")
-                }
-                onMouseOut={(e) =>
-                  !isLoading && (e.target.style.backgroundColor = "#1a237e")
-                }
+                className="flex-1 py-3 bg-cyan-500 text-white font-semibold rounded-lg hover:bg-cyan-600 hover:shadow-lg disabled:bg-gray-300 disabled:cursor-not-allowed transition-all duration-200 transform hover:scale-105"
+                aria-label="Add service"
               >
                 {isLoading ? "Adding..." : "Add Service"}
               </button>
               <button
                 type="button"
-                onClick={() => navigate("/dashboard")}
-                style={{
-                  padding: "12px 24px",
-                  backgroundColor: "#ccc",
-                  color: "#444",
-                  border: "none",
-                  borderRadius: "8px",
-                  fontSize: "15px",
-                  fontWeight: "600",
-                  cursor: "pointer",
-                  transition: "all 0.3s ease",
-                  flex: 1,
-                }}
-                onMouseOver={(e) => (e.target.style.backgroundColor = "#bbb")}
-                onMouseOut={(e) => (e.target.style.backgroundColor = "#ccc")}
+                onClick={handleCancel}
+                className="flex-1 py-3 bg-gray-500 text-white font-semibold rounded-lg hover:bg-gray-600 hover:shadow-lg transition-all duration-200 transform hover:scale-105"
+                aria-label="Cancel"
               >
                 Cancel
               </button>

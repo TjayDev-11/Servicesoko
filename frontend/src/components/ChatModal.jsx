@@ -2,7 +2,9 @@ import { useState, useEffect } from "react";
 import { IoMdClose } from "react-icons/io";
 import { BsArrowRight } from "react-icons/bs";
 import useStore from "../store";
-import api from "../api";
+import axios from "axios";
+
+const api = axios.create({ baseURL: import.meta.env.VITE_API_URL });
 
 const ChatModal = ({ seller, onClose }) => {
   const { user, token, fetchConversations } = useStore();
@@ -11,7 +13,6 @@ const ChatModal = ({ seller, onClose }) => {
   const [error, setError] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
 
-  // Fetch messages on mount
   useEffect(() => {
     const fetchMessages = async () => {
       if (!token || !seller?.id) {
@@ -23,7 +24,6 @@ const ChatModal = ({ seller, onClose }) => {
         const response = await api.get(`/api/messages/${seller.id}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
-        console.log("Fetched messages:", response.data);
         setMessages(response.data.messages || []);
         setError(null);
       } catch (err) {
@@ -43,7 +43,6 @@ const ChatModal = ({ seller, onClose }) => {
     fetchMessages();
   }, [token, seller?.id]);
 
-  // Send message
   const sendMessage = async () => {
     if (!newMessage.trim() || !seller?.id || !token) {
       setError("Please enter a message and ensure you’re logged in");
@@ -51,10 +50,6 @@ const ChatModal = ({ seller, onClose }) => {
     }
     setIsLoading(true);
     try {
-      console.log("Sending message:", {
-        receiverId: seller.id,
-        content: newMessage,
-      });
       const response = await api.post(
         "/api/messages",
         {
@@ -65,11 +60,9 @@ const ChatModal = ({ seller, onClose }) => {
           headers: { Authorization: `Bearer ${token}` },
         }
       );
-      console.log("Sent message:", response.data);
       setMessages((prev) => [...prev, response.data.message]);
       setNewMessage("");
       setError(null);
-      // Refresh conversations to update unread count
       await fetchConversations(token);
     } catch (err) {
       console.error("Error sending message:", {
@@ -98,45 +91,59 @@ const ChatModal = ({ seller, onClose }) => {
   };
 
   return (
-    <div className="chat-overlay">
-      <div className="chat-modal">
-        <div className="chat-header">
-          <div className="seller-info">
-            <div className="avatar">
+    <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 font-inter">
+      <div className="bg-white w-full max-w-md h-[70vh] rounded-lg flex flex-col shadow-xl">
+        <div className="flex justify-between items-center p-4 bg-cyan-400 text-white rounded-t-lg">
+          <div className="flex items-center gap-2">
+            <div className="w-12 h-12 rounded-full overflow-hidden bg-gray-100 flex items-center justify-center flex-shrink-0">
               {seller?.image ? (
-                <img src={seller.image} alt={seller.name} />
+                <img
+                  src={seller.image}
+                  alt={seller.name}
+                  className="w-full h-full object-cover"
+                />
               ) : (
-                <div className="initials">
+                <span className="text-gray-600 font-semibold text-base">
                   {seller?.name
                     ?.split(" ")
                     .map((n) => n[0])
                     .join("") || "?"}
-                </div>
+                </span>
               )}
             </div>
-            <div>
-              <h3>{seller?.name || "Unknown Seller"}</h3>
-            </div>
+            <h3 className="text-base font-semibold">
+              {seller?.name || "Unknown Seller"}
+            </h3>
           </div>
-          <button onClick={onClose} className="close-btn">
-            <IoMdClose />
+          <button
+            onClick={onClose}
+            className="text-white hover:text-gray-200 transition-colors"
+            aria-label="Close chat"
+          >
+            <IoMdClose size={20} />
           </button>
         </div>
-        <div className="chat-messages">
+        <div className="flex-1 p-4 overflow-y-auto bg-gray-50">
           {isLoading && messages.length === 0 ? (
-            <div className="empty-chat">Loading...</div>
+            <div className="h-full flex items-center justify-center text-gray-600 text-sm">
+              Loading...
+            </div>
           ) : messages.length === 0 ? (
-            <div className="empty-chat">Start your conversation</div>
+            <div className="h-full flex items-center justify-center text-gray-600 text-sm">
+              Start your conversation
+            </div>
           ) : (
             messages.map((msg) => (
               <div
                 key={msg.id}
-                className={`message ${
-                  msg.senderId === user?.id ? "sent" : "received"
+                className={`max-w-[70%] p-3 rounded-2xl mb-3 text-sm ${
+                  msg.senderId === user?.id
+                    ? "bg-cyan-400 text-white ml-auto rounded-br-md"
+                    : "bg-gray-200 text-gray-900 mr-auto rounded-bl-md"
                 }`}
               >
                 {msg.content}
-                <span className="time">
+                <span className="block text-xs opacity-70 mt-1 text-right">
                   {new Date(msg.createdAt).toLocaleTimeString([], {
                     hour: "2-digit",
                     minute: "2-digit",
@@ -147,14 +154,11 @@ const ChatModal = ({ seller, onClose }) => {
           )}
         </div>
         {error && (
-          <div
-            className="error-message"
-            style={{ color: "red", padding: "8px" }}
-          >
+          <div className="p-2 text-red-500 text-sm bg-red-100 mx-4 rounded-md">
             {error}
           </div>
         )}
-        <div className="chat-input">
+        <div className="p-3 border-t border-gray-200 flex gap-2">
           <input
             type="text"
             value={newMessage}
@@ -162,12 +166,16 @@ const ChatModal = ({ seller, onClose }) => {
             placeholder="Type a message..."
             onKeyPress={(e) => e.key === "Enter" && sendMessage()}
             disabled={isLoading}
+            className="flex-1 px-4 py-2 border border-gray-300 rounded-full text-gray-900 text-sm focus:ring-2 focus:ring-cyan-400 focus:border-cyan-400 disabled:bg-gray-100 transition-all"
+            aria-label="Type a message"
           />
           <button
             onClick={sendMessage}
             disabled={!newMessage.trim() || isLoading}
+            className="w-10 h-10 flex items-center justify-center bg-cyan-400 text-white rounded-full hover:bg-cyan-500 disabled:bg-gray-300 disabled:cursor-not-allowed transition-all"
+            aria-label="Send message"
           >
-            <BsArrowRight />
+            <BsArrowRight size={20} />
           </button>
         </div>
       </div>
@@ -176,161 +184,3 @@ const ChatModal = ({ seller, onClose }) => {
 };
 
 export default ChatModal;
-
-const styles = `
-  .chat-overlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(0, 0, 0, 0.5);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 1000;
-  }
-
-  .chat-modal {
-    background: #FFFFFF;
-    width: 100%;
-    max-width: 480px;
-    height: 70vh;
-    border-radius: 12px;
-    display: flex;
-    flex-direction: column;
-  }
-
-  .chat-header {
-    padding: 12px 16px;
-    background: #3B82F6;
-    color: #FFFFFF;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }
-
-  .seller-info {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-  }
-
-  .avatar {
-    width: 48px;
-    height: 48px;
-    border-radius: 50%;
-    overflow: hidden;
-    background: #F3F4F6;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    flex-shrink: 0;
-  }
-
-  .avatar img {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-  }
-
-  .initials {
-    font-size: 16px;
-    font-weight: 600;
-    color: #6B7280;
-  }
-
-  .chat-header h3 {
-    font-size: 16px;
-    margin: 0;
-  }
-
-  .close-btn {
-    background: none;
-    border: none;
-    color: #FFFFFF;
-    font-size: 20px;
-    cursor: pointer;
-  }
-
-  .chat-messages {
-    flex: 1;
-    padding: 16px;
-    overflow-y: auto;
-    background: #F9FAFB;
-  }
-
-  .empty-chat {
-    height: 100%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: #6B7280;
-    font-size: 14px;
-  }
-
-  .message {
-    max-width: 70%;
-    padding: 8px 12px;
-    border-radius: 16px;
-    margin-bottom: 12px;
-    font-size: 14px;
-  }
-
-  .message.sent {
-    background: #3B82F6;
-    color: #FFFFFF;
-    margin-left: auto;
-    border-bottom-right-radius: 4px;
-  }
-
-  .message.received {
-    background: #E5E7EB;
-    color: #2D2D2D;
-    margin-right: auto;
-    border-bottom-left-radius: 4px;
-  }
-
-  .time {
-    display: block;
-    font-size: 11px;
-    opacity: 0.7;
-    margin-top: 4px;
-    text-align: right;
-  }
-
-  .chat-input {
-    padding: 12px;
-    border-top: 1px solid #E5E7EB;
-    display: flex;
-    gap: 8px;
-  }
-
-  .chat-input input {
-    flex: 1;
-    padding: 10px 12px;
-    border: 1px solid #E5E7EB;
-    border-radius: 20px;
-    outline: none;
-    font-size: 14px;
-  }
-
-  .chat-input button {
-    width: 40px;
-    height: 40px;
-    border-radius: 50%;
-    border: none;
-    background: #3B82F6;
-    color: #FFFFFF;
-    cursor: pointer;
-  }
-
-  .chat-input button:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-`;
-
-const styleSheet = document.createElement("style");
-styleSheet.textContent = styles;
-document.head.appendChild(styleSheet);

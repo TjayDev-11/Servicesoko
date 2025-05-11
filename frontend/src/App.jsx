@@ -13,6 +13,7 @@ import Dashboard from "./pages/Dashboard";
 import Messages from "./pages/Messages";
 import Services from "./pages/Services";
 import ServiceDetails from "./pages/ServiceDetails";
+import BecomeSeller from "./pages/BecomeSeller";
 import Contact from "./pages/Contact";
 import AddService from "./pages/AddService";
 import Profile from "./pages/Profile";
@@ -68,36 +69,42 @@ function App() {
 
   useEffect(() => {
     const bootstrapAuth = async () => {
-      console.log(
-        "bootstrapAuth called, token:",
-        token ? token.substring(0, 10) + "..." : "null"
-      );
       const storedToken = localStorage.getItem("authToken");
-      if (storedToken) {
-        console.log("Validating stored token");
-        const user = await validateToken(storedToken);
-        if (user) {
-          console.log("Token valid, setting token and user");
-          await setToken(
-            storedToken,
-            user,
-            localStorage.getItem("refreshToken")
-          );
-        } else {
-          console.log("Token invalid, clearing token");
+      const refreshToken = localStorage.getItem("refreshToken");
+
+      console.log("Bootstrapping auth. Stored token:", storedToken);
+
+      // Only attempt to validate if token is present and not the string "null"
+      if (storedToken && storedToken !== "null") {
+        console.log("Valid token found, validating...");
+
+        try {
+          const user = await validateToken(storedToken);
+          if (user) {
+            console.log("Token valid, setting token and user.");
+            await setToken(storedToken, user, refreshToken);
+          } else {
+            console.log("Token invalid, clearing auth.");
+            await setToken(null, null, null);
+            localStorage.removeItem("authToken");
+            localStorage.removeItem("refreshToken");
+          }
+        } catch (err) {
+          console.error("Error validating token:", err);
           await setToken(null, null, null);
+          localStorage.removeItem("authToken");
+          localStorage.removeItem("refreshToken");
         }
       } else {
-        console.log("No stored token, setting isAuthenticated to false");
+        console.log("No token present, skipping validation.");
         await setToken(null, null, null);
       }
-      // Delay to ensure isAuthenticated is updated
-      await new Promise((resolve) => setTimeout(resolve, 500));
+
       setBootstrapped(true);
-      console.log("Bootstrap complete, isAuthenticated:", isAuthenticated);
     };
+
     bootstrapAuth();
-  }, [token, validateToken, setToken, setBootstrapped]);
+  }, [validateToken, setToken, setBootstrapped]);
 
   console.log(
     "App render, isAuthenticated:",
@@ -111,21 +118,7 @@ function App() {
   );
 
   if (!bootstrapped) {
-    return (
-      <div
-        style={{
-          height: "100vh",
-          display: "flex",
-          justifyContent: "center",
-          alignItems: "center",
-          backgroundColor: "#1F2937",
-          color: "#FFF",
-          fontSize: "18px",
-        }}
-      >
-        Checking authentication...
-      </div>
-    );
+    return null;
   }
 
   return (
@@ -157,6 +150,8 @@ function App() {
                 )
               }
             />
+            
+<Route path="/become-seller" element={<BecomeSeller />} />
             <Route
               path="/dashboard"
               element={

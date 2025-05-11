@@ -9,78 +9,122 @@ const BookingModal = ({
   onConfirm,
   onClose,
   bookingStatus,
-  error, // Add error prop
+  error,
 }) => {
   return (
-    <div className="booking-modal-overlay">
-      <div className="booking-modal">
-        <div className="booking-header">
-          <h3>Confirm Booking</h3>
-          <button onClick={onClose} className="close-btn">
-            <IoMdClose />
+    <div
+      className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 font-inter animate-fadeInUp"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="booking-modal-title"
+    >
+      <div className="bg-white w-11/12 sm:max-w-md rounded-lg shadow-xl flex flex-col">
+        <div className="flex justify-between items-center p-4 bg-cyan-400 text-white rounded-t-lg">
+          <h3 id="booking-modal-title" className="text-base font-semibold">
+            Confirm Booking
+          </h3>
+          <button
+            onClick={onClose}
+            className="text-white hover:text-gray-200 transition-colors"
+            aria-label="Close booking modal"
+          >
+            <IoMdClose size={20} />
           </button>
         </div>
-        <div className="booking-content">
+        <div className="p-4 flex flex-col gap-4">
           {bookingStatus === "pending" ? (
-            <div className="booking-status">
-              <div className="spinner"></div>
-              <p>Processing your booking...</p>
+            <div className="flex flex-col items-center gap-3 text-center">
+              <div className="border-4 border-gray-200 border-t-cyan-400 rounded-full w-8 h-8 animate-spin" />
+              <p className="text-sm text-gray-600">
+                Processing your booking...
+              </p>
             </div>
           ) : bookingStatus === "success" ? (
-            <div className="booking-status">
-              <p>Booking confirmed! Redirecting...</p>
+            <div className="flex flex-col items-center gap-3 text-center">
+              <p className="text-sm text-green-600">
+                Booking confirmed! Redirecting...
+              </p>
             </div>
           ) : bookingStatus === "failed" ? (
-            <div className="booking-status error">
-              <p>
+            <div className="flex flex-col items-center gap-3 text-center">
+              <p className="text-sm text-red-500">
                 {error ||
                   "Booking failed. Please try again or contact support."}
               </p>
-              <button onClick={onConfirm} className="btn retry-btn">
+              <button
+                onClick={onConfirm}
+                className="px-4 py-2 bg-cyan-400 text-gray-900 font-medium rounded-md hover:bg-cyan-500 hover:shadow-md transition-colors text-sm"
+                aria-label="Retry booking"
+              >
                 Retry
               </button>
             </div>
           ) : bookingStatus === "needsLogin" ? (
-            <div className="booking-status login-prompt">
-              <p>Please log in to confirm your booking.</p>
-              <Link to="/login" className="btn login-btn">
+            <div className="flex flex-col items-center gap-3 text-center">
+              <p className="text-sm text-gray-600">
+                Please log in to confirm your booking.
+              </p>
+              <Link
+                to="/login"
+                className="px-4 py-2 bg-cyan-400 text-gray-900 font-medium rounded-md hover:bg-cyan-500 hover:shadow-md transition-colors text-sm"
+                aria-label="Log in to book"
+              >
                 Log In
               </Link>
             </div>
           ) : (
             <>
-              <div className="booking-detail">
-                <label>Professional:</label>
-                <p>{seller?.name || "N/A"}</p>
+              <div className="flex justify-between items-center">
+                <label className="text-sm font-medium text-gray-600">
+                  Professional:
+                </label>
+                <p className="text-sm text-gray-900">{seller?.name || "N/A"}</p>
               </div>
-              <div className="booking-detail">
-                <label>Service:</label>
-                <p>{seller?.serviceName || "N/A"}</p>
+              <div className="flex justify-between items-center">
+                <label className="text-sm font-medium text-gray-600">
+                  Service:
+                </label>
+                <p className="text-sm text-gray-900">
+                  {seller?.serviceName || "N/A"}
+                </p>
               </div>
-              <div className="booking-detail">
-                <label>Price:</label>
-                <p>{seller?.price ? `From KSh ${seller.price}` : "N/A"}</p>
+              <div className="flex justify-between items-center">
+                <label className="text-sm font-medium text-gray-600">
+                  Price:
+                </label>
+                <p className="text-sm text-gray-900">
+                  {seller?.price ? `From KSh ${seller.price}` : "N/A"}
+                </p>
               </div>
-              <div className="booking-detail">
-                <label>Date:</label>
-                <div className="date-picker">
-                  <FaCalendarAlt />
+              <div className="flex justify-between items-center">
+                <label className="text-sm font-medium text-gray-600">
+                  Date:
+                </label>
+                <div className="flex items-center gap-2 border border-gray-200 rounded-md px-3 py-2">
+                  <FaCalendarAlt className="text-gray-600" />
                   <input
                     type="date"
-                    value={bookingDate}
+                    value={bookingDate || ""}
                     onChange={(e) => setBookingDate(e.target.value)}
                     min={new Date().toISOString().split("T")[0]}
+                    className="border-none outline-none text-sm text-gray-900 focus:ring-2 focus:ring-cyan-400 rounded"
+                    aria-label="Select booking date"
                   />
                 </div>
               </div>
-              <div className="booking-actions">
-                <button onClick={onClose} className="btn cancel-btn">
+              <div className="flex gap-3">
+                <button
+                  onClick={onClose}
+                  className="flex-1 py-2 bg-gray-100 text-gray-900 font-medium rounded-md hover:bg-gray-200 transition-colors text-sm"
+                  aria-label="Cancel booking"
+                >
                   Cancel
                 </button>
                 <button
                   onClick={onConfirm}
-                  className="btn confirm-btn"
+                  className="flex-1 py-2 bg-cyan-400 text-gray-900 font-medium rounded-md hover:bg-cyan-500 hover:shadow-md disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors text-sm"
                   disabled={!bookingDate}
+                  aria-label="Confirm booking"
                 >
                   Confirm Booking
                 </button>
@@ -94,192 +138,3 @@ const BookingModal = ({
 };
 
 export default BookingModal;
-
-const styles = `
-  .booking-modal-overlay {
-    position: fixed;
-    top: 0;
-    left: 0;
-    right: 0;
-    bottom: 0;
-    background: rgba(0, 0, 0, 0.5);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 1000;
-  }
-
-  .booking-modal {
-    background: #FFFFFF;
-    width: 100%;
-    max-width: 480px;
-    border-radius: 12px;
-    display: flex;
-    flex-direction: column;
-  }
-
-  .booking-header {
-    padding: 12px 16px;
-    background: #3B82F6;
-    color: #FFFFFF;
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }
-
-  .booking-header h3 {
-    font-size: 16px;
-    margin: 0;
-  }
-
-  .close-btn {
-    background: none;
-    border: none;
-    color: #FFFFFF;
-    font-size: 20px;
-    cursor: pointer;
-  }
-
-  .booking-content {
-    padding: 16px;
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-  }
-
-  .booking-detail {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-  }
-
-  .booking-detail label {
-    font-size: 14px;
-    font-weight: 500;
-    color: #6B7280;
-  }
-
-  .booking-detail p {
-    font-size: 14px;
-    margin: 0;
-  }
-
-  .date-picker {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    border: 1px solid #E5E7EB;
-    border-radius: 6px;
-    padding: 8px;
-  }
-
-  .date-picker svg {
-    color: #6B7280;
-  }
-
-  .date-picker input {
-    border: none;
-    outline: none;
-    font-size: 14px;
-  }
-
-  .booking-actions {
-    display: flex;
-    gap: 8px;
-  }
-
-  .btn {
-    flex: 1;
-    padding: 10px;
-    border: none;
-    border-radius: 6px;
-    font-size: 14px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-    cursor: pointer;
-    transition: background 0.2s;
-  }
-
-  .cancel-btn {
-    background: #F3F4F6;
-    color: #2D2D2D;
-  }
-
-  .cancel-btn:hover {
-    background: #E5E7EB;
-  }
-
-  .confirm-btn {
-    background: #3B82F6;
-    color: #FFFFFF;
-  }
-
-  .confirm-btn:hover {
-    background: #2563EB;
-  }
-
-  .confirm-btn:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-
-  .retry-btn {
-    background: #3B82F6;
-    color: #FFFFFF;
-  }
-
-  .retry-btn:hover {
-    background: #2563EB;
-  }
-
-  .login-btn {
-    background: #3B82F6;
-    color: #FFFFFF;
-    text-decoration: none;
-  }
-
-  .login-btn:hover {
-    background: #2563EB;
-  }
-
-  .booking-status {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 12px;
-    text-align: center;
-  }
-
-  .booking-status p {
-    margin: 0;
-    font-size: 14px;
-  }
-
-  .booking-status.error p {
-    color: #EF4444;
-  }
-
-  .booking-status.login-prompt p {
-    color: #2D2D2D;
-  }
-
-  .spinner {
-    width: 32px;
-    height: 32px;
-    border: 3px solid #F3F4F6;
-    border-top: 3px solid #3B82F6;
-    border-radius: 50%;
-    animation: spin 1s linear infinite;
-  }
-
-  @keyframes spin {
-    0% { transform: rotate(0deg); }
-    100% { transform: rotate(360deg); }
-  }
-`;
-
-const styleSheet = document.createElement("style");
-styleSheet.textContent = styles;
-document.head.appendChild(styleSheet);

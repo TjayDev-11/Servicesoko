@@ -14,7 +14,6 @@ import {
   FaChevronDown,
 } from "react-icons/fa";
 
-// Utility to debounce API calls
 const debounce = (func, wait) => {
   let timeout;
   return (...args) => {
@@ -32,19 +31,16 @@ function Navbar() {
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   const dropdownRef = useRef(null);
-  const timeoutRef = useRef(null);
+  const mobileMenuRef = useRef(null);
 
-  // Cache for API responses
   const dataCache = useRef({
     unreadCount: 0,
     lastFetchedUnread: 0,
     ordersFetched: false,
   });
 
-  // Compute newOrdersCount from sellerOrders
   const newOrdersCount = sellerOrders?.newOrders?.length || 0;
 
-  // Debounced fetchUnreadCount
   const fetchUnreadCount = useCallback(
     debounce(async (force = false) => {
       const now = Date.now();
@@ -65,21 +61,22 @@ function Navbar() {
             headers: { Authorization: `Bearer ${token}` },
           }
         );
-        const totalUnread = response.data.conversations.reduce(
-          (sum, conv) => sum + (conv.unreadCount || 0),
-          0
-        );
+        const totalUnread =
+          response.data.conversations?.reduce(
+            (sum, conv) => sum + (conv.unreadCount || 0),
+            0
+          ) || 0;
         dataCache.current.unreadCount = totalUnread;
         dataCache.current.lastFetchedUnread = now;
         setUnreadCount(totalUnread);
       } catch (error) {
+        console.error("Error fetching unread count:", error);
         setUnreadCount(dataCache.current.unreadCount || 0);
       }
     }, 300),
     [token, isAuthenticated]
   );
 
-  // Preload data on mount
   useEffect(() => {
     if (isAuthenticated && token) {
       if (!dataCache.current.lastFetchedUnread) {
@@ -95,460 +92,316 @@ function Navbar() {
     }
   }, [isAuthenticated, token, fetchUnreadCount, fetchOrders]);
 
-  // Handle click outside to close dropdown
   useEffect(() => {
     const handleClickOutside = (event) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
+      if (
+        dropdownRef.current &&
+        !dropdownRef.current.contains(event.target) &&
+        mobileMenuRef.current &&
+        !mobileMenuRef.current.contains(event.target)
+      ) {
         setIsDropdownOpen(false);
+        setIsMobileMenuOpen(false);
       }
     };
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // Auto-close dropdown after 5 seconds
-  useEffect(() => {
-    if (isDropdownOpen) {
-      timeoutRef.current = setTimeout(() => {
-        setIsDropdownOpen(false);
-      }, 5000);
-    }
-    return () => clearTimeout(timeoutRef.current);
-  }, [isDropdownOpen]);
-
-  const resetAutoCloseTimer = useCallback(() => {
-    if (timeoutRef.current) {
-      clearTimeout(timeoutRef.current);
-      timeoutRef.current = setTimeout(() => {
-        setIsDropdownOpen(false);
-      }, 5000);
-    }
-  }, []);
-
-  const handleDropdownOpen = useCallback(() => {
-    setIsDropdownOpen(true);
-    setUnreadCount(dataCache.current.unreadCount);
+  const handleDropdownToggle = useCallback(() => {
+    setIsDropdownOpen((prev) => !prev);
   }, []);
 
   const handleLogout = useCallback(() => {
     clear();
+    setIsDropdownOpen(false);
+    setIsMobileMenuOpen(false);
     navigate("/login");
   }, [clear, navigate]);
 
   const toggleMobileMenu = useCallback(() => {
     setIsMobileMenuOpen((prev) => !prev);
+    setIsDropdownOpen(false);
   }, []);
 
   return (
     <>
-      <style>
-        {`
-          .nav-link {
-            color: rgba(255, 255, 255, 0.9);
-            text-decoration: none;
-            padding: 8px 12px;
-            transition: all 0.2s ease;
-            font-weight: 500;
-            font-size: 15px;
-            border-radius: 4px;
-          }
-          .nav-link:hover {
-            color: white;
-            background-color: rgba(255, 255, 255, 0.1);
-          }
-          .active-nav-link {
-            color: white;
-            font-weight: 600;
-          }
-          .logo-container {
-            display: flex;
-            align-items: center;
-            gap: 10px;
-          }
-          .logo-img {
-            height: 36px;
-            width: auto;
-          }
-          .desktop-nav {
-            display: flex;
-            gap: 4px;
-            align-items: center;
-          }
-          .mobile-nav {
-            display: none;
-            flex-direction: column;
-            position: absolute;
-            top: 100%;
-            left: 0;
-            right: 0;
-            background-color: rgba(26, 35, 126, 0.98);
-            padding: 16px;
-            z-index: 999;
-          }
-          .mobile-nav-link {
-            color: rgba(255, 255, 255, 0.9);
-            text-decoration: none;
-            padding: 12px 16px;
-            font-size: 16px;
-            font-weight: 500;
-            transition: all 0.2s ease;
-          }
-          .mobile-nav-link:hover {
-            color: white;
-            background-color: rgba(255, 255, 255, 0.1);
-          }
-          .mobile-active-nav-link {
-            color: white;
-            font-weight: 600;
-          }
-          .hamburger {
-            display: none;
-            background: none;
-            border: none;
-            color: white;
-            font-size: 24px;
-            cursor: pointer;
-            padding: 8px;
-          }
-          .login-btn {
-            background: transparent;
-            color: white;
-            border: 1px solid rgba(255, 255, 255, 0.3);
-            padding: 8px 16px;
-            border-radius: 4px;
-            font-weight: 500;
-            transition: all 0.2s ease;
-          }
-          .login-btn:hover {
-            background: rgba(255, 255, 255, 0.1);
-            border-color: rgba(255, 255, 255, 0.5);
-          }
-          .user-btn {
-            background: transparent;
-            border: none;
-            color: white;
-            display: flex;
-            align-items: center;
-            gap: 6px;
-            padding: 8px 12px;
-            border-radius: 4px;
-            cursor: pointer;
-            transition: all 0.2s ease;
-          }
-          .user-btn:hover {
-            background: rgba(255, 255, 255, 0.1);
-          }
-          .notification-badge {
-            background-color: #4fc3f7;
-            color: #0d47a1;
-            border-radius: 10px;
-            padding: 2px 6px;
-            font-size: 11px;
-            font-weight: 600;
-            margin-left: 4px;
-          }
-          @media (max-width: 768px) {
-            .desktop-nav {
-              display: none;
-            }
-            .hamburger {
-              display: block;
-            }
-            .mobile-nav {
-              display: ${isMobileMenuOpen ? "flex" : "none"};
-            }
-            .logo-img {
-              height: 32px;
-            }
-            .dropdown-menu {
-              width: 100%;
-              right: 0;
-              left: 0;
-            }
-          }
-        `}
-      </style>
-      <nav
-        style={{
-          backgroundColor: "rgba(26, 35, 126, 0.98)",
-          padding: "16px 24px",
-          position: "sticky",
-          top: 0,
-          zIndex: 1000,
-          borderBottom: "1px solid rgba(255, 255, 255, 0.1)",
-        }}
-      >
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            alignItems: "center",
-            maxWidth: "1200px",
-            margin: "0 auto",
-          }}
-        >
-          <Link
-            to="/"
-            className="logo-container"
-            style={{ textDecoration: "none" }}
-          >
+      <nav className="fixed top-0 left-0 right-0 z-50 py-3 px-4 sm:px-6 lg:px-8 font-manrope bg-white/40 backdrop-blur-md shadow-sm">
+        <div className="max-w-7xl mx-auto flex justify-between items-center">
+          <Link to="/" className="flex items-center gap-2">
             <img
               src="/images/logo.png"
               alt="ServiceSoko Logo"
-              className="logo-img"
+              className="h-7 sm:h-8"
+              onError={(e) => (e.target.src = "/images/fallback-logo.png")}
             />
-            <span
-              style={{
-                color: "white",
-                fontSize: "22px",
-                fontWeight: "600",
-                fontFamily: "'Inter', sans-serif",
-              }}
-            >
-              Service<span style={{ color: "#4fc3f7" }}>Soko</span>
+            <span className="text-gray-900 text-lg sm:text-xl font-semibold">
+              Service<span className="text-cyan-400">Soko</span>
             </span>
           </Link>
 
-          <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-            <div className="desktop-nav">
-              <Link
-                to="/"
-                className={`nav-link ${
-                  location.pathname === "/" ? "active-nav-link" : ""
-                }`}
-              >
-                Home
-              </Link>
-              <Link
-                to="/about"
-                className={`nav-link ${
-                  location.pathname === "/about" ? "active-nav-link" : ""
-                }`}
-              >
-                About
-              </Link>
-              <Link
-                to="/services"
-                className={`nav-link ${
-                  location.pathname === "/services" ? "active-nav-link" : ""
-                }`}
-              >
-                Services
-              </Link>
-              <Link
-                to="/contact"
-                className={`nav-link ${
-                  location.pathname === "/contact" ? "active-nav-link" : ""
-                }`}
-              >
-                Contact
-              </Link>
-              {!isAuthenticated && (
-                <Link to="/login" className="login-btn">
-                  Log in
+          <div className="flex items-center gap-3 sm:gap-4">
+            {/* Desktop Navigation */}
+            <ul className="hidden md:flex items-center gap-2">
+              <li>
+                <Link
+                  to="/"
+                  className={`px-2 py-1 text-gray-900 text-sm font-medium hover:text-cyan-400 rounded-md transition-colors font-custom ${
+                    location.pathname === "/" ? "text-cyan-400" : ""
+                  }`}
+                  aria-current={location.pathname === "/" ? "page" : undefined}
+                >
+                  Home
                 </Link>
+              </li>
+              <li>
+                <Link
+                  to="/about"
+                  className={`px-2 py-1 text-gray-900 text-sm font-medium hover:text-cyan-400 rounded-md transition-colors font-custom ${
+                    location.pathname === "/about" ? "text-cyan-400" : ""
+                  }`}
+                  aria-current={
+                    location.pathname === "/about" ? "page" : undefined
+                  }
+                >
+                  About
+                </Link>
+              </li>
+              <li>
+                <Link
+                  to="/services"
+                  className={`px-2 py-1 text-gray-900 text-sm font-medium hover:text-cyan-400 rounded-md transition-colors font-custom ${
+                    location.pathname === "/services" ? "text-cyan-400" : ""
+                  }`}
+                  aria-current={
+                    location.pathname === "/services" ? "page" : undefined
+                  }
+                >
+                  Services
+                </Link>
+              </li>
+              <li>
+                <Link
+                  to="/contact"
+                  className={`px-2 py-1 text-gray-900 text-sm font-medium hover:text-cyan-400 rounded-md transition-colors font-custom ${
+                    location.pathname === "/contact" ? "text-cyan-400" : ""
+                  }`}
+                  aria-current={
+                    location.pathname === "/contact" ? "page" : undefined
+                  }
+                >
+                  Contact
+                </Link>
+              </li>
+              {!isAuthenticated && (
+                <li>
+                  <Link
+                    to="/login"
+                    className="px-3 py-1.5 border border-cyan-500 text-cyan-500 rounded-full font-medium text-sm hover:bg-gray-100 hover:text-gray-900 focus:ring-2 focus:ring-cyan-400 focus:ring-offset-2 transition-colors"
+                    aria-label="Log in"
+                  >
+                    Log in
+                  </Link>
+                </li>
               )}
-            </div>
+            </ul>
 
+            {/* Mobile Menu Button */}
             <button
-              className="hamburger"
+              className="md:hidden text-gray-900 p-2 rounded-md hover:bg-gray-100 transition-colors"
               onClick={toggleMobileMenu}
               aria-label={isMobileMenuOpen ? "Close menu" : "Open menu"}
+              aria-expanded={isMobileMenuOpen}
+              aria-controls="mobile-menu"
             >
-              {isMobileMenuOpen ? <FaTimes /> : <FaBars />}
+              {isMobileMenuOpen ? <FaTimes size={18} /> : <FaBars size={18} />}
             </button>
 
+            {/* User Dropdown */}
             {isAuthenticated && (
-              <div className="dropdown-container" ref={dropdownRef}>
+              <div className="relative" ref={dropdownRef}>
                 <button
-                  className="user-btn"
-                  onClick={handleDropdownOpen}
+                  className="flex items-center gap-1 px-2 py-1 text-gray-900 hover:text-cyan-400 rounded-md transition-colors"
+                  onClick={handleDropdownToggle}
                   aria-label="User menu"
+                  aria-expanded={isDropdownOpen}
+                  aria-controls="user-dropdown"
                 >
-                  <FaUser />
-                  <FaChevronDown size={12} />
+                  <FaUser size={16} />
+                  <FaChevronDown size={10} />
                   {(unreadCount > 0 || newOrdersCount > 0) && (
-                    <span className="notification-badge">
+                    <span className="bg-cyan-400 text-gray-900 rounded-full px-1.5 py-0.5 text-xs font-semibold ml-1">
                       {unreadCount + newOrdersCount}
                     </span>
                   )}
                 </button>
+
                 {isDropdownOpen && (
-                  <div
-                    className="dropdown-menu"
-                    style={{
-                      position: "absolute",
-                      top: "calc(100% + 8px)",
-                      right: 0,
-                      backgroundColor: "rgba(26, 35, 126, 0.98)",
-                      borderRadius: "8px",
-                      boxShadow: "0 4px 12px rgba(0,0,0,0.2)",
-                      minWidth: "220px",
-                      zIndex: 1000,
-                      border: "1px solid rgba(255, 255, 255, 0.1)",
-                    }}
-                    onMouseMove={resetAutoCloseTimer}
+                  <ul
+                    id="user-dropdown"
+                    className="absolute right-0 mt-7 w-56 bg-white rounded-lg shadow-md border border-gray-200 animate-fadeInUp z-50"
                   >
-                    <Link
-                      to="/profile"
-                      style={dropdownLinkStyle()}
-                      onClick={() => setIsDropdownOpen(false)}
-                    >
-                      <FaUser
-                        style={{ marginRight: "10px", color: "#4fc3f7" }}
-                      />
-                      Profile
-                    </Link>
-                    <Link
-                      to="/dashboard"
-                      style={dropdownLinkStyle()}
-                      onClick={() => setIsDropdownOpen(false)}
-                    >
-                      <FaTachometerAlt
-                        style={{ marginRight: "10px", color: "#4fc3f7" }}
-                      />
-                      Dashboard
-                    </Link>
-                    <Link
-                      to="/messages"
-                      style={dropdownLinkStyle()}
-                      onClick={() => {
-                        setIsDropdownOpen(false);
-                        fetchUnreadCount(true);
-                      }}
-                    >
-                      <FaEnvelope
-                        style={{ marginRight: "10px", color: "#4fc3f7" }}
-                      />
-                      Messages
-                      {unreadCount > 0 && (
-                        <span style={badgeStyle("#4fc3f7")}>{unreadCount}</span>
-                      )}
-                    </Link>
-                    <Link
-                      to="/orders"
-                      style={dropdownLinkStyle()}
-                      onClick={() => setIsDropdownOpen(false)}
-                    >
-                      <FaShoppingBag
-                        style={{ marginRight: "10px", color: "#4fc3f7" }}
-                      />
-                      Orders
-                      {newOrdersCount > 0 && (
-                        <span style={badgeStyle("#4fc3f7")}>
-                          {newOrdersCount} New
-                        </span>
-                      )}
-                    </Link>
-                    <div
-                      style={{
-                        padding: "8px",
-                        borderTop: "1px solid rgba(255, 255, 255, 0.1)",
-                      }}
-                    >
+                    <li>
+                      <Link
+                        to="/profile"
+                        className="flex items-center px-4 py-2 text-gray-900 hover:bg-gray-100 hover:text-cyan-400 transition-colors text-sm font-medium"
+                        onClick={() => setIsDropdownOpen(false)}
+                        aria-label="View profile"
+                      >
+                        <FaUser className="text-cyan-400 mr-2" size={14} />
+                        Profile
+                      </Link>
+                    </li>
+                    <li>
+                      <Link
+                        to="/dashboard"
+                        className="flex items-center px-4 py-2 text-gray-900 hover:bg-gray-100 hover:text-cyan-400 transition-colors text-sm font-medium"
+                        onClick={() => setIsDropdownOpen(false)}
+                        aria-label="View dashboard"
+                      >
+                        <FaTachometerAlt
+                          className="text-cyan-400 mr-2"
+                          size={14}
+                        />
+                        Dashboard
+                      </Link>
+                    </li>
+                    <li>
+                      <Link
+                        to="/messages"
+                        className="flex items-center px-4 py-2 text-gray-900 hover:bg-gray-100 hover:text-cyan-400 transition-colors text-sm font-medium"
+                        onClick={() => {
+                          setIsDropdownOpen(false);
+                          fetchUnreadCount(true);
+                        }}
+                        aria-label="View messages"
+                      >
+                        <FaEnvelope className="text-cyan-400 mr-2" size={14} />
+                        Messages
+                        {unreadCount > 0 && (
+                          <span className="bg-cyan-400 text-gray-900 rounded-full px-1.5 py-0.5 text-xs font-semibold ml-auto">
+                            {unreadCount}
+                          </span>
+                        )}
+                      </Link>
+                    </li>
+                    <li>
+                      <Link
+                        to="/orders"
+                        className="flex items-center px-4 py-2 text-gray-900 hover:bg-gray-100 hover:text-cyan-400 transition-colors text-sm font-medium"
+                        onClick={() => setIsDropdownOpen(false)}
+                        aria-label="View orders"
+                      >
+                        <FaShoppingBag
+                          className="text-cyan-400 mr-2"
+                          size={14}
+                        />
+                        Orders
+                        {newOrdersCount > 0 && (
+                          <span className="bg-cyan-400 text-gray-900 rounded-full px-1.5 py-0.5 text-xs font-semibold ml-auto">
+                            {newOrdersCount} New
+                          </span>
+                        )}
+                      </Link>
+                    </li>
+                    <li>
                       <button
                         onClick={handleLogout}
-                        style={{
-                          display: "flex",
-                          alignItems: "center",
-                          width: "100%",
-                          padding: "10px 16px",
-                          background: "none",
-                          border: "none",
-                          color: "rgba(255, 255, 255, 0.8)",
-                          fontWeight: "500",
-                          cursor: "pointer",
-                          borderRadius: "4px",
-                          transition: "all 0.2s ease",
-                        }}
-                        onMouseOver={(e) => (e.target.style.color = "white")}
-                        onMouseOut={(e) =>
-                          (e.target.style.color = "rgba(255, 255, 255, 0.8)")
-                        }
+                        className="flex items-center w-full px-4 py-2 text-gray-900 hover:bg-gray-100 hover:text-cyan-400 transition-colors text-sm font-medium"
+                        aria-label="Log out"
                       >
-                        <FaSignOutAlt style={{ marginRight: "10px" }} />
+                        <FaSignOutAlt
+                          className="text-cyan-400 mr-2"
+                          size={14}
+                        />
                         Logout
                       </button>
-                    </div>
-                  </div>
+                    </li>
+                  </ul>
                 )}
               </div>
             )}
           </div>
         </div>
-        <div className="mobile-nav">
-          <Link
-            to="/"
-            className={`mobile-nav-link ${
-              location.pathname === "/" ? "mobile-active-nav-link" : ""
-            }`}
-            onClick={() => setIsMobileMenuOpen(false)}
+
+        {/* Mobile Navigation */}
+        {isMobileMenuOpen && (
+          <ul
+            ref={mobileMenuRef}
+            id="mobile-menu"
+            className="md:hidden bg-white absolute top-full left-0 right-0 z-40 px-4 py-4 border-t border-gray-200 shadow-md animate-fadeInUp"
           >
-            Home
-          </Link>
-          <Link
-            to="/about"
-            className={`mobile-nav-link ${
-              location.pathname === "/about" ? "mobile-active-nav-link" : ""
-            }`}
-            onClick={() => setIsMobileMenuOpen(false)}
-          >
-            About
-          </Link>
-          <Link
-            to="/services"
-            className={`mobile-nav-link ${
-              location.pathname === "/services" ? "mobile-active-nav-link" : ""
-            }`}
-            onClick={() => setIsMobileMenuOpen(false)}
-          >
-            Services
-          </Link>
-          <Link
-            to="/contact"
-            className={`mobile-nav-link ${
-              location.pathname === "/contact" ? "mobile-active-nav-link" : ""
-            }`}
-            onClick={() => setIsMobileMenuOpen(false)}
-          >
-            Contact
-          </Link>
-          {!isAuthenticated && (
-            <Link
-              to="/login"
-              className="login-btn"
-              style={{ marginTop: "8px", textAlign: "center" }}
-              onClick={() => setIsMobileMenuOpen(false)}
-            >
-              Log in
-            </Link>
-          )}
-        </div>
+            <li>
+              <Link
+                to="/"
+                className={`block px-3 py-2 text-gray-900 text-sm font-medium hover:bg-gray-100 hover:text-cyan-400 rounded-md transition-colors font-custom ${
+                  location.pathname === "/" ? "text-cyan-400" : ""
+                }`}
+                onClick={() => setIsMobileMenuOpen(false)}
+                aria-current={location.pathname === "/" ? "page" : undefined}
+              >
+                Home
+              </Link>
+            </li>
+            <li>
+              <Link
+                to="/about"
+                className={`block px-3 py-2 text-gray-900 text-sm font-medium hover:bg-gray-100 hover:text-cyan-400 rounded-md transition-colors font-custom ${
+                  location.pathname === "/about" ? "text-cyan-400" : ""
+                }`}
+                onClick={() => setIsMobileMenuOpen(false)}
+                aria-current={
+                  location.pathname === "/about" ? "page" : undefined
+                }
+              >
+                About
+              </Link>
+            </li>
+            <li>
+              <Link
+                to="/services"
+                className={`block px-3 py-2 text-gray-900 text-sm font-medium hover:bg-gray-100 hover:text-cyan-400 rounded-md transition-colors font-custom ${
+                  location.pathname === "/services" ? "text-cyan-400" : ""
+                }`}
+                onClick={() => setIsMobileMenuOpen(false)}
+                aria-current={
+                  location.pathname === "/services" ? "page" : undefined
+                }
+              >
+                Services
+              </Link>
+            </li>
+            <li>
+              <Link
+                to="/contact"
+                className={`block px-3 py-2 text-gray-900 text-sm font-medium hover:bg-gray-100 hover:text-cyan-400 rounded-md transition-colors font-custom ${
+                  location.pathname === "/contact" ? "text-cyan-400" : ""
+                }`}
+                onClick={() => setIsMobileMenuOpen(false)}
+                aria-current={
+                  location.pathname === "/contact" ? "page" : undefined
+                }
+              >
+                Contact
+              </Link>
+            </li>
+            {!isAuthenticated && (
+              <li>
+                <Link
+                  to="/login"
+                  className="block mt-2 px-3 py-1.5 border border-cyan-500 text-cyan-500 rounded-full font-medium text-sm hover:bg-gray-100 hover:text-gray-900 focus:ring-2 focus:ring-cyan-400 focus:ring-offset-2 text-center transition-colors"
+                  onClick={() => setIsMobileMenuOpen(false)}
+                  aria-label="Log in"
+                >
+                  Log in
+                </Link>
+              </li>
+            )}
+          </ul>
+        )}
       </nav>
     </>
   );
 }
-
-const dropdownLinkStyle = () => ({
-  display: "flex",
-  alignItems: "center",
-  padding: "12px 16px",
-  color: "rgba(255, 255, 255, 0.9)",
-  textDecoration: "none",
-  fontWeight: "500",
-  transition: "all 0.2s ease",
-  borderBottom: "1px solid rgba(255, 255, 255, 0.05)",
-  fontSize: "14px",
-});
-
-const badgeStyle = (bgColor) => ({
-  marginLeft: "auto",
-  backgroundColor: bgColor,
-  color: "#0d47a1",
-  borderRadius: "10px",
-  padding: "2px 6px",
-  fontSize: "11px",
-  fontWeight: "600",
-});
 
 export default Navbar;
