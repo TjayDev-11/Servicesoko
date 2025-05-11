@@ -16,5 +16,9 @@
       "connectionTimeout": 30,
       "connectString": "postgresql://servicesoko_user:b7wrAR8OjxeWs6oPl61ZRhPMd0M2EX4p@dpg-d00d5bfgi27c73b5ojf0-a.virginia-postgres.render.com/servicesoko"
     }
-  ]
+  ],
+  "git.ignoreLimitWarning": true,
+  "css.lint.unknownAtRules": "ignore"
 }
+
+
