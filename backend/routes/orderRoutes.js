@@ -633,147 +633,6 @@ router.put(
   }
 );
 
-// Submit a review for a service
-router.post(
-  "/orders/:id/review",
-  authenticateToken,
-  orderLimiter,
-  async (req, res) => {
-    const { id } = req.params;
-    const { rating, comment } = req.body;
-
-    try {
-      // Validation
-      if (!rating || typeof rating !== "number" || rating < 1 || rating > 5) {
-        return res
-          .status(400)
-          .json({ error: "Rating must be a number between 1 and 5" });
-      }
-
-      const order = await prisma.order.findUnique({
-        where: { id },
-        include: { buyer: true, service: true },
-      });
-
-      if (!order) {
-        return res.status(404).json({ error: "Order not found" });
-      }
-
-      if (order.buyerId !== req.user.id) {
-        return res
-          .status(403)
-          .json({ error: "Only the buyer can submit a review" });
-      }
-
-      if (order.status !== "COMPLETED") {
-        return res
-          .status(400)
-          .json({ error: "Order must be completed to submit a review" });
-      }
-
-      const existingReview = await prisma.review.findFirst({
-        where: { serviceId: order.serviceId, userId: req.user.id },
-      });
-
-      if (existingReview) {
-        return res
-          .status(400)
-          .json({ error: "Review already submitted for this service" });
-      }
-
-      const review = await prisma.review.create({
-        data: {
-          serviceId: order.serviceId,
-          userId: req.user.id,
-          rating,
-          comment: comment ? comment.trim() : null,
-        },
-        include: { service: true },
-      });
-
-      // Send review submitted notifications to the seller
-      const seller = await prisma.user.findUnique({
-        where: { id: order.sellerId },
-      });
-
-      const notificationParams = {
-        sellerEmail: seller.email,
-        sellerName: seller.name,
-        sellerPhone: seller.phone,
-        buyerName: req.user.name,
-        serviceTitle: order.service.title,
-        rating: review.rating,
-        comment: review.comment,
-        reviewId: review.id,
-      };
-
-      // Email notification
-      console.log(
-        `ServiceSoko: Attempting review submitted email notification for review ${review.id}`
-      );
-      try {
-        const emailResult = await notifyReviewSubmitted(notificationParams);
-        console.log(
-          `ServiceSoko: Review submitted email notification for review ${review.id}:`,
-          emailResult
-        );
-        if (!emailResult.success) {
-          console.error(
-            `ServiceSoko: Failed to send review submitted email notification to ${notificationParams.sellerEmail}:`,
-            emailResult.error
-          );
-        }
-      } catch (emailError) {
-        console.error(
-          `ServiceSoko: Error sending review submitted email notification for review ${review.id}:`,
-          emailError.message,
-          emailError.stack
-        );
-      }
-
-      // SMS notification
-      console.log(
-        `ServiceSoko: Attempting review submitted SMS notification for review ${review.id}`
-      );
-      try {
-        const smsResult = await notifyReviewSubmittedSMS(notificationParams);
-        console.log(
-          `ServiceSoko: Review submitted SMS notification for review ${review.id}:`,
-          smsResult
-        );
-        if (!smsResult.success) {
-          console.error(
-            `ServiceSoko: Failed to send review submitted SMS notification to ${notificationParams.sellerPhone}:`,
-            smsResult.error
-          );
-        }
-      } catch (smsError) {
-        console.error(
-          `ServiceSoko: Error sending review submitted SMS notification for review ${review.id}:`,
-          smsError.message,
-          smsError.stack
-        );
-      }
-
-      res.json({
-        message: "Review submitted successfully",
-        review: {
-          id: review.id,
-          rating: review.rating,
-          comment: review.comment,
-        },
-      });
-    } catch (error) {
-      console.error("Review submission error:", error);
-      res.status(500).json({
-        error: "Failed to submit review",
-        details:
-          process.env.NODE_ENV === "development" ? error.message : undefined,
-      });
-    }
-  }
-);
-
 // Get user orders (as buyer or seller)
 router.get("/orders", authenticateToken, async (req, res) => {
   try {
@@ -791,10 +650,13 @@ router.get("/orders", authenticateToken, async (req, res) => {
 
     const formattedOrders = orders.map((order) => ({
       id: order.id,
+      serviceId: order.serviceId, // Include serviceId
       serviceTitle: order.service.title,
       buyerName: order.buyer.name,
       sellerName: order.seller.name,
+      sellerId: order.sellerId, // Include sellerId for chat
       bookingDate: order.bookingDate,
+      createdAt: order.createdAt,
       status: order.status,
       role: order.buyerId === req.user.id ? "BUYER" : "SELLER",
     }));
@@ -821,7 +683,7 @@ router.get("/seller-orders", authenticateToken, async (req, res) => {
     const newOrders = await prisma.order.findMany({
       where: {
         sellerId: req.user.id,
-        status: "PENDING",
+        status: { in: ["PENDING", "ACCEPTED", "IN_PROGRESS"] },
       },
       include: {
         buyer: { select: { id: true, name: true } },
@@ -835,7 +697,7 @@ router.get("/seller-orders", authenticateToken, async (req, res) => {
     const orderHistory = await prisma.order.findMany({
       where: {
         sellerId: req.user.id,
-        status: { not: "PENDING" },
+        status: { in: ["COMPLETED", "REJECTED", "CANCELLED"] },
       },
       include: {
         buyer: { select: { id: true, name: true } },
@@ -849,25 +711,31 @@ router.get("/seller-orders", authenticateToken, async (req, res) => {
     const newOrdersCount = await prisma.order.count({
       where: {
         sellerId: req.user.id,
-        status: "PENDING",
+        status: { in: ["PENDING", "ACCEPTED", "IN_PROGRESS"] },
       },
     });
 
     const formattedNewOrders = newOrders.map((order) => ({
       id: order.id,
+      serviceId: order.serviceId, // Include serviceId
       serviceTitle: order.service.title,
       buyerName: order.buyer.name,
       sellerName: order.seller.name,
+      sellerId: order.sellerId, // Include sellerId for chat
       bookingDate: order.bookingDate,
+      createdAt: order.createdAt,
       status: order.status,
     }));
 
     const formattedOrderHistory = orderHistory.map((order) => ({
       id: order.id,
+      serviceId: order.serviceId, // Include serviceId
       serviceTitle: order.service.title,
       buyerName: order.buyer.name,
       sellerName: order.seller.name,
+      sellerId: order.sellerId, // Include sellerId for chat
       bookingDate: order.bookingDate,
+      createdAt: order.createdAt,
       status: order.status,
     }));
 

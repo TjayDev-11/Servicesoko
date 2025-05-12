@@ -1,275 +1,203 @@
 import express from "express";
 import { PrismaClient } from "@prisma/client";
 import authenticateToken from "../middleware/authMiddleware.js";
-import DOMPurify from "dompurify";
 import rateLimit from "express-rate-limit";
-import { body, param, validationResult } from "express-validator"; // Added validationResult
-import { notifyReviewSubmitted } from "../utils/notify.js"; // Import notification utility
+import DOMPurify from "dompurify";
+import { JSDOM } from "jsdom";
+import {
+  notifyReviewSubmitted,
+  notifyReviewSubmittedSMS,
+} from "../utils/notify.js";
 
 const router = express.Router();
 const prisma = new PrismaClient();
+const { window } = new JSDOM("");
+const domPurify = DOMPurify(window);
 
-// Rate limiting
+// Rate limiting for review submission
 const reviewLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 10, // Limit each user to 10 review actions per window
-  keyGenerator: (req) => req.user.id,
+  max: 5, // Limit each user to 5 review submissions per window
+  keyGenerator: (req) => req.user.id, // Limit by user ID
+  message: {
+    error: "Too many review submissions",
+    code: "RATE_LIMITED",
+    message: "Please try again later",
+  },
 });
 
-// Review validation
-const validateReview = [
-  body("serviceId").isString().notEmpty(),
-  body("rating").isInt({ min: 1, max: 5 }),
-  body("comment").optional().isString().trim().isLength({ max: 1000 }),
-];
-
-// Submit review
+// Submit a review for an order
 router.post(
-  "/reviews",
+  "/orders/:orderId/review",
   authenticateToken,
   reviewLimiter,
-  validateReview,
   async (req, res) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({
-        error: errors.array()[0].msg,
-        code: "VALIDATION_ERROR",
-      });
-    }
-
-    const { serviceId, rating, comment } = req.body;
+    const { orderId } = req.params;
+    const { rating, comment } = req.body;
 
     try {
-      // Verify order completion
-      const completedOrder = await prisma.order.findFirst({
-        where: {
-          serviceId,
-          buyerId: req.user.id,
-          status: "COMPLETED", // Changed to uppercase to match schema
+      // Validate input
+      if (!rating || rating < 1 || rating > 5) {
+        return res
+          .status(400)
+          .json({ error: "Rating must be between 1 and 5" });
+      }
+
+      // Find the order
+      const order = await prisma.order.findUnique({
+        where: { id: orderId },
+        include: {
+          buyer: { select: { id: true, name: true, email: true, phone: true } },
+          seller: { 
+            select: { 
+              id: true, 
+              name: true, 
+              email: true, 
+              phone: true,
+              sellerProfile: { select: { userId: true } }
+            } 
+          },
+          service: { select: { id: true, title: true } },
         },
-        select: { sellerId: true },
       });
 
-      if (!completedOrder) {
-        return res.status(403).json({
-          error: "You can only review completed orders",
-          code: "ORDER_NOT_COMPLETED",
-        });
+      if (!order) {
+        return res.status(404).json({ error: "Order not found" });
+      }
+
+      // Check if the user is the buyer
+      if (order.buyerId !== req.user.id) {
+        return res
+          .status(403)
+          .json({ error: "Only the buyer can submit a review" });
+      }
+
+      // Check if the order is completed
+      if (order.status !== "COMPLETED") {
+        return res
+          .status(400)
+          .json({ error: "Order must be completed to submit a review" });
       }
 
       // Check for existing review
       const existingReview = await prisma.review.findFirst({
         where: {
-          serviceId,
-          buyerId: req.user.id,
+          orderId: order.id,
+          userId: req.user.id,
         },
       });
 
       if (existingReview) {
-        return res.status(400).json({
-          error: "You've already reviewed this service",
-          code: "DUPLICATE_REVIEW",
-        });
+        return res
+          .status(400)
+          .json({ error: "You have already reviewed this order" });
       }
 
-      // Create review in transaction
-      const review = await prisma.$transaction(async (tx) => {
-        const newReview = await tx.review.create({
+      // Create the review within a transaction
+      const [newReview] = await prisma.$transaction([
+        prisma.review.create({
           data: {
-            serviceId,
-            buyerId: req.user.id,
-            sellerId: completedOrder.sellerId,
+            orderId: order.id,
+            userId: req.user.id,
+            sellerId: order.seller.sellerProfile.userId,
             rating: Math.min(5, Math.max(1, rating)),
-            comment: comment ? DOMPurify.sanitize(comment.trim()) : null,
+            comment: comment ? domPurify.sanitize(comment.trim()) : null,
           },
           include: {
-            buyer: {
-              select: {
-                id: true,
-                name: true,
-              },
-            },
-            service: {
-              select: {
-                title: true,
-              },
-            },
-            seller: {
-              // Added to get seller email
-              select: {
-                id: true,
-                name: true,
-                email: true,
-              },
-            },
+            order: { select: { id: true } },
+            user: { select: { id: true, name: true } },
+            seller: { select: { userId: true } },
           },
-        });
-
-        // Update service average rating
-        await tx.service.update({
-          where: { id: serviceId },
+        }),
+        // Update seller profile ratings
+        prisma.sellerProfile.update({
+          where: { userId: order.sellerId },
           data: {
-            averageRating: await tx.review
-              .aggregate({
-                where: { serviceId },
-                _avg: { rating: true },
-              })
-              .then((res) => res._avg.rating),
+            ratings: {
+              push: rating,
+            },
           },
-        });
+        }),
+      ]);
 
-        return newReview;
-      });
+      // Send review submitted notifications
+      const notificationParams = {
+        sellerEmail: order.seller.email,
+        sellerName: order.seller.name,
+        sellerPhone: order.seller.phone,
+        buyerName: order.buyer.name,
+        serviceTitle: order.service.title,
+        orderId: order.id,
+        rating,
+        comment: newReview.comment,
+      };
 
-      // Send review notification to seller
-      if (review.seller.email) {
-        try {
-          const notificationResult = await notifyReviewSubmitted({
-            sellerEmail: review.seller.email,
-            sellerName: review.seller.name,
-            buyerName: review.buyer.name,
-            serviceTitle: review.service.title,
-            rating,
-            comment: comment || null,
-            reviewId: review.id,
-          });
-          if (!notificationResult.success) {
-            console.error(
-              `ServiceSoko: Failed to notify seller ${review.seller.id} for review ${review.id}:`,
-              notificationResult.error
-            );
-          }
-        } catch (notificationError) {
+      // Email notification
+      console.log(
+        `ServiceSoko: Attempting review submitted email notification for order ${order.id}`
+      );
+      try {
+        const emailResult = await notifyReviewSubmitted(notificationParams);
+        console.log(
+          `ServiceSoko: Review submitted email notification for order ${order.id}:`,
+          emailResult
+        );
+        if (!emailResult.success) {
           console.error(
-            `ServiceSoko: Notification error for review ${review.id}:`,
-            notificationError.message
+            `ServiceSoko: Failed to send review submitted email notification to ${notificationParams.sellerEmail}:`,
+            emailResult.error
           );
         }
+      } catch (emailError) {
+        console.error(
+          `ServiceSoko: Error sending review submitted email notification for order ${order.id}:`,
+          emailError.message,
+          emailError.stack
+        );
       }
 
-      res.status(201).json({
-        success: true,
+      // SMS notification
+      console.log(
+        `ServiceSoko: Attempting review submitted SMS notification for order ${order.id}`
+      );
+      try {
+        const smsResult = await notifyReviewSubmittedSMS(notificationParams);
+        console.log(
+          `ServiceSoko: Review submitted SMS notification for order ${order.id}:`,
+          smsResult
+        );
+        if (!smsResult.success) {
+          console.error(
+            `ServiceSoko: Failed to send review submitted SMS notification to ${notificationParams.sellerPhone}:`,
+            smsResult.error
+          );
+        }
+      } catch (smsError) {
+        console.error(
+          `ServiceSoko: Error sending review submitted SMS notification for order ${order.id}:`,
+          smsError.message,
+          smsError.stack
+        );
+      }
+
+      res.json({
+        message: "Review submitted successfully",
         review: {
-          id: review.id,
-          rating: review.rating,
-          comment: review.comment,
-          createdAt: review.createdAt,
-          buyer: review.buyer,
-          service: review.service,
+          id: newReview.id,
+          orderId: newReview.orderId,
+          userId: newReview.userId,
+          sellerId: newReview.sellerId,
+          rating: newReview.rating,
+          comment: newReview.comment,
+          createdAt: newReview.createdAt,
         },
       });
     } catch (error) {
       console.error("Review submission error:", error);
       res.status(500).json({
         error: "Failed to submit review",
-        code: "REVIEW_SUBMISSION_FAILED",
-      });
-    }
-  }
-);
-
-// Get service reviews
-router.get(
-  "/services/:serviceId/reviews",
-  param("serviceId").isString().notEmpty(),
-  async (req, res) => {
-    const { serviceId } = req.params;
-
-    try {
-      const reviews = await prisma.review.findMany({
-        where: { serviceId },
-        orderBy: { createdAt: "desc" },
-        select: {
-          id: true,
-          rating: true,
-          comment: true,
-          createdAt: true,
-          buyer: {
-            select: {
-              id: true,
-              name: true,
-              sellerProfile: {
-                select: {
-                  profilePhoto: true,
-                },
-              },
-            },
-          },
-        },
-        take: 50, // Limit to 50 most recent reviews
-      });
-
-      res.json({
-        success: true,
-        reviews: reviews.map((r) => ({
-          ...r,
-          comment: r.comment ? DOMPurify.sanitize(r.comment) : null,
-          buyer: {
-            id: r.buyer.id,
-            name: DOMPurify.sanitize(r.buyer.name),
-            profilePhoto: r.buyer.sellerProfile?.profilePhoto,
-          },
-        })),
-      });
-    } catch (error) {
-      console.error("Get reviews error:", error);
-      res.status(500).json({
-        error: "Failed to fetch reviews",
-        code: "REVIEWS_FETCH_FAILED",
-      });
-    }
-  }
-);
-
-// Delete review (optional)
-router.delete(
-  "/reviews/:id",
-  authenticateToken,
-  param("id").isString().notEmpty(),
-  async (req, res) => {
-    try {
-      const review = await prisma.review.findUnique({
-        where: { id: req.params.id },
-      });
-
-      if (!review) {
-        return res.status(404).json({
-          error: "Review not found",
-          code: "REVIEW_NOT_FOUND",
-        });
-      }
-
-      if (review.buyerId !== req.user.id) {
-        return res.status(403).json({
-          error: "You can only delete your own reviews",
-          code: "UNAUTHORIZED_DELETE",
-        });
-      }
-
-      await prisma.$transaction(async (tx) => {
-        await tx.review.delete({ where: { id: review.id } });
-
-        // Update service average rating
-        await tx.service.update({
-          where: { id: review.serviceId },
-          data: {
-            averageRating: await tx.review
-              .aggregate({
-                where: { serviceId: review.serviceId },
-                _avg: { rating: true },
-              })
-              .then((res) => res._avg.rating),
-          },
-        });
-      });
-
-      res.json({ success: true, message: "Review deleted" });
-    } catch (error) {
-      console.error("Delete review error:", error);
-      res.status(500).json({
-        error: "Failed to delete review",
-        code: "REVIEW_DELETE_FAILED",
+        details:
+          process.env.NODE_ENV === "development" ? error.message : undefined,
       });
     }
   }

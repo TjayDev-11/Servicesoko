@@ -4,12 +4,12 @@ import authenticateToken from "../middleware/authMiddleware.js";
 import { JSDOM } from "jsdom";
 import createDOMPurify from "dompurify";
 import rateLimit from "express-rate-limit";
-import multer from "multer"; // Add multer
+import multer from "multer";
 import { notifyServiceAdded, notifyServiceAddedSMS } from "../utils/notify.js";
 
 const router = express.Router();
 const prisma = new PrismaClient();
-const upload = multer(); // Configure multer to parse form-data
+const upload = multer();
 
 const { window } = new JSDOM("");
 const DOMPurify = createDOMPurify(window);
@@ -31,7 +31,7 @@ router.post(
   "/services",
   authenticateToken,
   serviceLimiter,
-  upload.none(), // Parse form-data without files
+  upload.none(),
   async (req, res) => {
     const { title, description, price, category, experience } = req.body;
 
@@ -133,7 +133,7 @@ router.post(
         return { service, serviceSeller, category: categoryRecord.name };
       });
 
-      // Send notifications (unchanged)
+      // Send notifications
       if (req.user.email) {
         console.log(
           `ServiceSoko: Attempting service added email notification for user ${req.user.id}, email: ${req.user.email}`
@@ -230,17 +230,17 @@ router.post(
   }
 );
 
-// Other routes (unchanged)
+// Get all services
 router.get("/services", async (req, res) => {
   try {
     const services = await prisma.service.findMany({
       include: {
-        reviews: true,
         serviceSellers: {
           include: {
             seller: {
               include: {
                 sellerProfile: true,
+                reviews: true, // Fetch reviews associated with the seller (User model)
               },
             },
           },
@@ -252,9 +252,8 @@ router.get("/services", async (req, res) => {
     const servicesWithSellerRatings = services.map((service) => {
       const sellers = service.serviceSellers.map((serviceSeller) => {
         const seller = serviceSeller.seller;
-        const sellerReviews = service.reviews.filter(
-          (review) => review.sellerId === seller.id
-        );
+        // Use seller.reviews (from User model, linked via sellerId in Review)
+        const sellerReviews = seller.reviews || [];
         const avgRating =
           sellerReviews.length > 0
             ? sellerReviews.reduce((sum, r) => sum + r.rating, 0) /
@@ -297,6 +296,7 @@ router.get("/services", async (req, res) => {
   }
 });
 
+// Get user's services
 router.get("/services/user", authenticateToken, async (req, res) => {
   try {
     const services = await prisma.service.findMany({
@@ -350,6 +350,7 @@ router.get("/services/user", authenticateToken, async (req, res) => {
   }
 });
 
+// Get sellers for a specific service
 router.get("/services/:id/sellers", async (req, res) => {
   const { id } = req.params;
   try {
@@ -361,9 +362,7 @@ router.get("/services/:id/sellers", async (req, res) => {
             seller: {
               include: {
                 sellerProfile: true,
-                reviews: {
-                  where: { serviceId: id },
-                },
+                reviews: true, // Fetch reviews associated with the seller
               },
             },
           },
@@ -404,6 +403,7 @@ router.get("/services/:id/sellers", async (req, res) => {
     });
   }
 });
+
 // Delete a service
 router.delete("/services/:id", authenticateToken, async (req, res) => {
   const { id } = req.params;
@@ -415,6 +415,9 @@ router.delete("/services/:id", authenticateToken, async (req, res) => {
         serviceId: id,
         sellerId: req.user.id,
       },
+      include: {
+        service: true, // Include service to access title
+      },
     });
 
     if (!serviceSeller) {
@@ -423,14 +426,14 @@ router.delete("/services/:id", authenticateToken, async (req, res) => {
       });
     }
 
-    // Delete the serviceSeller record (service itself remains if other sellers offer it)
+    // Delete the serviceSeller record
     await prisma.serviceSeller.delete({
       where: {
         id: serviceSeller.id,
       },
     });
 
-    // Optionally, delete the service if no other sellers are associated
+    // Delete the service if no other sellers are associated
     const remainingSellers = await prisma.serviceSeller.count({
       where: { serviceId: id },
     });
@@ -448,7 +451,7 @@ router.delete("/services/:id", authenticateToken, async (req, res) => {
 
     if (sellerProfile && sellerProfile.services) {
       const updatedServices = sellerProfile.services.filter(
-        (serviceTitle) => serviceTitle !== serviceSeller.title
+        (serviceTitle) => serviceTitle !== serviceSeller.service.title
       );
       await prisma.sellerProfile.update({
         where: { userId: req.user.id },
