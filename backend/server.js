@@ -23,11 +23,22 @@ const app = express();
 const prisma = new PrismaClient();
 
 // Security Middleware
-app.use(helmet());
+app.use(
+  helmet.contentSecurityPolicy({
+    directives: {
+      defaultSrc: ["'self'"],
+      imgSrc: ["'self'", 'data:', 'https:', 'http:'],
+      scriptSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+    },
+  })
+);
 app.use(
   cors({
-    origin:process.env.CORS_ORIGIN ||  "http://localhost:5173",
+    origin: true, // Reflect the request origin (safer than "*")
     credentials: true,
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
     optionsSuccessStatus: 200,
   })
 );
@@ -36,7 +47,7 @@ app.use(
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 1000, // Allow more requests in dev
-  skip: (req) => req.ip === "::1" || req.ip === "127.0.0.1", // Skip for localhost/ limit each IP to 100 requests per windowMs
+  skip: (req) => req.ip === "::1" || req.ip === "127.0.0.1", // Skip for localhost
 });
 app.use(limiter);
 
@@ -51,9 +62,15 @@ app.use(express.urlencoded({ extended: true, limit: "10kb" }));
 app.use(passport.initialize());
 
 // Static Files
-app.use("/Uploads", cors(), express.static(path.join(__dirname, "Uploads")));
-
-app.use("/Uploads", express.static(path.join(__dirname, "Uploads")));
+app.use(
+  "/Uploads",
+  express.static(path.join(__dirname, "Uploads"), {
+    setHeaders: (res, filePath) => {
+     
+      console.log(`Serving static file: ${filePath}`);
+    },
+  })
+);
 
 // API Routes
 app.use("/auth", authRoutes);

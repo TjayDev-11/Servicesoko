@@ -32,6 +32,8 @@ model User {
   password         String          @db.VarChar(255)
   phone            String?         @unique @db.VarChar(20)
   location         String?
+  bio              String?
+  profilePhoto     String?         @db.VarChar(255)
   role             UserRole        @default(BUYER)
   sellerProfile    SellerProfile?
   orders           Order[]         @relation("UserToOrder")
@@ -56,6 +58,7 @@ model SellerProfile {
   location       String?         @db.VarChar(100)
   gender         String?         @db.VarChar(20)
   profilePhoto   String?         @db.VarChar(255)
+  bio            String?
   experience     Int?
   services       String[]        @default([])
   isComplete     Boolean         @default(false)

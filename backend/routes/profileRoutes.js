@@ -40,6 +40,15 @@ const storage = multer.diskStorage({
 const upload = multer({
   storage,
   limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
+  fileFilter: (req, file, cb) => {
+    const filetypes = /jpeg|jpg|png/;
+    const extname = filetypes.test(path.extname(file.originalname).toLowerCase());
+    const mimetype = filetypes.test(file.mimetype);
+    if (extname && mimetype) {
+      return cb(null, true);
+    }
+    cb(new Error("Only JPEG and PNG images are allowed"));
+  },
 });
 
 const router = express.Router();
@@ -67,9 +76,11 @@ router.get("/profile", authenticateToken, profileLimiter, async (req, res) => {
         id: true,
         email: true,
         phone: true,
-        location: true, // Added to return user.location
+        location: true,
         role: true,
         name: true,
+        bio: true,
+        profilePhoto: true,
         sellerProfile: {
           select: {
             location: true,
@@ -79,6 +90,7 @@ router.get("/profile", authenticateToken, profileLimiter, async (req, res) => {
             services: true,
             experience: true,
             isComplete: true,
+            bio: true,
           },
         },
       },
@@ -122,14 +134,49 @@ router.put(
       const userId = req.user.id;
       const role = req.user.role;
 
-      const { name, email, location, phone, services } = req.body;
+      const { name, email, location, phone, services, bio } = req.body;
       const profilePhoto = req.file
         ? `/Uploads/profiles/${req.file.filename}`
         : undefined;
 
-      // Sanitize phone and location
+      // Validate required fields
+      if (!name?.trim() || !email?.trim()) {
+        if (req.file) fs.unlink(req.file.path, () => {});
+        return res.status(400).json({
+          message: "Name and email are required",
+          code: "MISSING_FIELDS",
+        });
+      }
+
+      // Validate email format
+      const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRegex.test(email)) {
+        if (req.file) fs.unlink(req.file.path, () => {});
+        return res.status(400).json({
+          message: "Invalid email format",
+          code: "INVALID_EMAIL_FORMAT",
+        });
+      }
+
+      // Sanitize inputs
       const sanitizedPhone = phone && DOMPurify.sanitize(phone.trim());
       const sanitizedLocation = location && DOMPurify.sanitize(location.trim());
+      const sanitizedBio = bio && DOMPurify.sanitize(bio.trim());
+
+      // Check for email uniqueness (excluding the current user)
+      const existingEmail = await prisma.user.findFirst({
+        where: {
+          email: email.trim(),
+          id: { not: userId },
+        },
+      });
+      if (existingEmail) {
+        if (req.file) fs.unlink(req.file.path, () => {});
+        return res.status(400).json({
+          message: "Email already in use by another account",
+          code: "EMAIL_ALREADY_IN_USE",
+        });
+      }
 
       // Check for phone number uniqueness
       if (sanitizedPhone) {
@@ -143,18 +190,21 @@ router.put(
         if (existingUser) {
           if (req.file) fs.unlink(req.file.path, () => {});
           return res.status(400).json({
-            message: "Phone number already in use by another account.",
+            message: "Phone number already in use by another account",
+            code: "PHONE_ALREADY_IN_USE",
           });
         }
       }
 
-      // Prepare update data
+      // Prepare update data for User
       const updateData = {
-        name,
-        email,
+        name: name.trim(),
+        email: email.trim(),
       };
       if (sanitizedPhone) updateData.phone = sanitizedPhone;
       if (sanitizedLocation) updateData.location = sanitizedLocation;
+      if (sanitizedBio) updateData.bio = sanitizedBio;
+      if (profilePhoto) updateData.profilePhoto = profilePhoto;
 
       const updatedUser = await prisma.user.update({
         where: { id: userId },
@@ -166,6 +216,8 @@ router.put(
           location: true,
           role: true,
           name: true,
+          bio: true,
+          profilePhoto: true,
           sellerProfile: {
             select: {
               location: true,
@@ -175,6 +227,7 @@ router.put(
               services: true,
               experience: true,
               isComplete: true,
+              bio: true,
             },
           },
         },
@@ -186,6 +239,7 @@ router.put(
 
         if (sanitizedLocation) sellerUpdateData.location = sanitizedLocation;
         if (sanitizedPhone) sellerUpdateData.phone = sanitizedPhone;
+        if (sanitizedBio) sellerUpdateData.bio = sanitizedBio;
         if (services) {
           sellerUpdateData.services =
             typeof services === "string"
@@ -228,6 +282,7 @@ router.put(
       return res.status(500).json({
         message: "Failed to update profile",
         error: error.message,
+        code: "PROFILE_UPDATE_FAILED",
       });
     }
   }
@@ -240,18 +295,27 @@ router.post(
   upload.single("profilePhoto"),
   async (req, res) => {
     try {
-      const { name, phone, location, gender } = req.body;
+      const { name, phone, location, gender, bio, services } = req.body;
       if (!name?.trim() || !location?.trim()) {
         return res.status(400).json({
           error: "Name and location are required",
           code: "MISSING_FIELDS",
         });
       }
+
       const validGenders = ["Male", "Female", "Other", "Prefer not to say"];
       const cleanGender = validGenders.includes(gender) ? gender : null;
       const cleanName = DOMPurify.sanitize(name.trim());
       const cleanPhone = phone ? DOMPurify.sanitize(phone.trim()) : null;
       const cleanLocation = DOMPurify.sanitize(location.trim());
+      const cleanBio = bio ? DOMPurify.sanitize(bio.trim()) : null;
+      const cleanServices =
+        typeof services === "string"
+          ? services
+              .split(",")
+              .map((s) => s.trim())
+              .filter(Boolean)
+          : [];
 
       const result = await prisma.$transaction(async (tx) => {
         const existingProfile = await tx.sellerProfile.findUnique({
@@ -272,20 +336,27 @@ router.post(
             location: cleanLocation,
             gender: cleanGender,
             profilePhoto: photoUrl,
-            services: [],
+            services: cleanServices,
+            bio: cleanBio,
             isComplete: true,
           },
         });
         const updatedUser = await tx.user.update({
           where: { id: req.user.id },
-          data: { role: "BOTH" },
+          data: {
+            role: "BOTH",
+            profilePhoto: photoUrl,
+            bio: cleanBio,
+          },
           select: {
             id: true,
             email: true,
             phone: true,
-            location: true, // Added to return user.location
+            location: true,
             role: true,
             name: true,
+            bio: true,
+            profilePhoto: true,
           },
         });
         return { sellerProfile, photoUrl, updatedUser };
