@@ -13,11 +13,11 @@ import {
   FaTools,
   FaRegCheckCircle,
   FaRegTimesCircle,
-  FaChevronDown,
-  FaChevronUp,
   FaTrash,
+  FaStar,
 } from "react-icons/fa";
 import ChatModal from "../components/ChatModal";
+import ReviewModal from "../components/ReviewModal"; // Import ReviewModal
 
 // Skeleton Loader Component
 const SkeletonLoader = () => (
@@ -48,7 +48,10 @@ const ServiceItem = memo(({ service, onDelete, deletingServiceId }) => {
             View <FaChevronRight size={12} />
           </Link>
           <button
-            onClick={() => onDelete(service.id)}
+            onClick={() => {
+              console.log(`Attempting to delete service with ID: ${service.id}`);
+              onDelete(service.id);
+            }}
             className="flex items-center gap-1 px-2 py-1 bg-red-500 text-white text-sm font-medium rounded-md hover:bg-red-600 disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
             disabled={deletingServiceId === service.id}
             aria-label={`Delete ${service.title || "service"}`}
@@ -86,6 +89,7 @@ function Dashboard() {
     clear,
     updateOrderStatusApi,
     deleteService,
+    submitReview,
   } = useStore();
 
   const [snack, setSnack] = useState({
@@ -102,7 +106,9 @@ function Dashboard() {
     history: false,
   });
   const [deletingServiceId, setDeletingServiceId] = useState(null);
-  const [isDataReady, setIsDataReady] = useState(false); // New state to track data readiness
+  const [isDataReady, setIsDataReady] = useState(false);
+  const [showReviewForm, setShowReviewForm] = useState({});
+  const [reviewedOrders, setReviewedOrders] = useState(new Set()); // Track reviewed orders
 
   const formatTimestamp = (dateString) => {
     if (!dateString) return "N/A";
@@ -119,6 +125,7 @@ function Dashboard() {
 
   const loadData = useCallback(async () => {
     if (!token) {
+      console.log("No token found, redirecting to login");
       setSnack({
         show: true,
         message: "No session found. Please log in.",
@@ -131,11 +138,13 @@ function Dashboard() {
     }
 
     setLoading(true);
-    setIsDataReady(false); // Reset data readiness
+    setIsDataReady(false);
 
     try {
+      console.log("Validating token");
       const userData = await validateToken(token);
       if (!userData) {
+        console.log("Invalid token, redirecting to login");
         setSnack({
           show: true,
           message: "Invalid session. Please log in again.",
@@ -147,23 +156,39 @@ function Dashboard() {
         return;
       }
 
+      console.log("Refreshing user data");
       await refreshUser();
       const currentUser = useStore.getState().user;
       const role = currentUser?.role?.toLowerCase() || "buyer";
+      console.log(`User role: ${role}`);
 
       const loaders = [fetchServices()];
       if (role === "buyer" || role === "both") {
-        loaders.push(fetchOrders());
+        console.log("Fetching buyer orders");
+        loaders.push(fetchOrders().catch((error) => {
+          console.error("fetchOrders error:", error);
+          setSnack({
+            show: true,
+            message: "Failed to load orders. Please try again.",
+            type: "error",
+          });
+          setTimeout(() => setSnack({ show: false, message: "", type: "info" }), 2000);
+          return [];
+        }));
       }
       if (role === "seller" || role === "both") {
         loaders.push(fetchUserServices(), fetchSellerOrders());
       }
 
+      console.log("Fetching data with loaders:", loaders);
       await Promise.all(loaders);
 
-      // Defer conversations fetch
+      console.log("Raw orders:", useStore.getState().orders);
+      console.log("Seller Orders Loaded:", useStore.getState().sellerOrders);
+
       setTimeout(async () => {
         try {
+          console.log("Fetching conversations");
           await fetchConversations();
         } catch (error) {
           console.error("Conversation fetch error:", error);
@@ -176,9 +201,8 @@ function Dashboard() {
         }
       }, 2000);
 
-      // Introduce a slight delay to ensure skeleton loaders persist
       await new Promise((resolve) => setTimeout(resolve, 300));
-      setIsDataReady(true); // Mark data as ready
+      setIsDataReady(true);
     } catch (error) {
       console.error("Load data error:", error);
       setSnack({
@@ -222,14 +246,16 @@ function Dashboard() {
         return;
       }
       try {
+        console.log(`Updating order ${orderId} to status ${status}`);
         await updateOrderStatusApi(orderId, status);
         setSnack({
           show: true,
-          message: "Order updated successfully!",
+          message: `Order ${status.toLowerCase()} successfully!`,
           type: "success",
         });
         setTimeout(() => setSnack({ show: false, message: "", type: "info" }), 2000);
         await fetchSellerOrders();
+        console.log("Seller Orders After Update:", useStore.getState().sellerOrders);
       } catch (error) {
         console.error("Order update error:", error);
         setSnack({
@@ -247,19 +273,30 @@ function Dashboard() {
   const handleDeleteService = useCallback(
     async (serviceId) => {
       if (!window.confirm("Are you sure you want to delete this service?")) {
+        console.log("Service deletion cancelled by user");
         return;
       }
+      console.log(`Initiating deletion of service with ID: ${serviceId}`);
       try {
         setDeletingServiceId(serviceId);
+        if (!deleteService) {
+          throw new Error("deleteService function is not defined in store");
+        }
         await deleteService(serviceId);
+        console.log(`Service with ID ${serviceId} deleted successfully`);
         setSnack({
           show: true,
           message: "Service deleted successfully!",
           type: "success",
         });
         setTimeout(() => setSnack({ show: false, message: "", type: "info" }), 2000);
+        await fetchUserServices();
       } catch (error) {
-        console.error("Delete service error:", error);
+        console.error("Delete service error:", {
+          message: error.message,
+          stack: error.stack,
+          response: error.response?.data,
+        });
         setSnack({
           show: true,
           message: error.response?.data?.error || "Failed to delete service",
@@ -270,11 +307,47 @@ function Dashboard() {
         setDeletingServiceId(null);
       }
     },
-    [deleteService]
+    [deleteService, fetchUserServices]
+  );
+
+  const handleSubmitReview = useCallback(
+    async ({ orderId, serviceId, rating, comment }) => {
+      console.log("handleSubmitReview called with:", { orderId, serviceId, rating, comment });
+      try {
+        if (!orderId || !serviceId) {
+          throw new Error(`Missing required fields: ${!orderId ? "orderId" : ""} ${!serviceId ? "serviceId" : ""}`);
+        }
+        await submitReview({ orderId, serviceId, rating, comment });
+        console.log(`Review submitted successfully for orderId: ${orderId}, serviceId: ${serviceId}`);
+        setSnack({
+          show: true,
+          message: "Review submitted successfully!",
+          type: "success",
+        });
+        setTimeout(() => setSnack({ show: false, message: "", type: "info" }), 2000);
+        setShowReviewForm((prev) => ({ ...prev, [orderId]: false }));
+        setReviewedOrders((prev) => new Set([...prev, orderId])); // Mark order as reviewed
+        await fetchOrders();
+      } catch (error) {
+        console.error("Review submission error:", {
+          message: error.message,
+          stack: error.stack,
+          response: error.response?.data,
+        });
+        setSnack({
+          show: true,
+          message: error.response?.data?.error || "Failed to submit review",
+          type: "error",
+        });
+        setTimeout(() => setSnack({ show: false, message: "", type: "info" }), 2000);
+      }
+    },
+    [submitReview, fetchOrders]
   );
 
   const openChat = useCallback((seller) => {
     if (!seller?.id) {
+      console.log("Cannot open chat: Seller ID is missing");
       setSnack({
         show: true,
         message: "Cannot open chat: Seller ID is missing",
@@ -399,11 +472,6 @@ function Dashboard() {
                 <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
                   <FaTools className="text-cyan-400" /> Your Services
                 </h2>
-                {collapsedSections.services ? (
-                  <FaChevronDown className="text-gray-600" />
-                ) : (
-                  <FaChevronUp className="text-gray-600" />
-                )}
               </button>
               <CSSTransition in={!collapsedSections.services} timeout={300} classNames="slide" unmountOnExit>
                 <div id="services-section">
@@ -455,13 +523,8 @@ function Dashboard() {
                 aria-controls="new-orders-section"
               >
                 <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
-                  <FaShoppingCart className="text-cyan-400" /> New Orders
+                  <FaShoppingCart className="text-cyan-400" /> New Orders to Deliver
                 </h2>
-                {collapsedSections.newOrders ? (
-                  <FaChevronDown className="text-gray-600" />
-                ) : (
-                  <FaChevronUp className="text-gray-600" />
-                )}
               </button>
               <CSSTransition in={!collapsedSections.newOrders} timeout={300} classNames="slide" unmountOnExit>
                 <div id="new-orders-section">
@@ -472,67 +535,99 @@ function Dashboard() {
                     </div>
                   ) : sellerOrders.newOrders.length > 0 ? (
                     <div>
-                      {sellerOrders.newOrders.slice(0, 4).map((order) => (
-                        <div
-                          key={order.id}
-                          className="py-3 border-b border-gray-200 hover:bg-gray-100 transition-colors"
-                        >
-                          <div className="flex justify-between items-center">
-                            <div>
-                              <p className="text-base font-medium text-gray-900">
-                                Order #{order.id?.slice(0, 8) || "N/A"}
-                              </p>
-                              <p className="text-sm text-gray-600">{order.serviceTitle || "Unknown"}</p>
-                              <p className="text-xs text-gray-500">{formatTimestamp(order.createdAt)}</p>
+                      {sellerOrders.newOrders
+                        .filter((order) => ["PENDING", "ACCEPTED", "IN_PROGRESS"].includes(order.status?.toUpperCase()))
+                        .slice(0, 4)
+                        .map((order) => (
+                          <div
+                            key={order.id}
+                            className="py-3 border-b border-gray-200 hover:bg-gray-100 transition-colors"
+                          >
+                            <div className="flex justify-between items-center">
+                              <div>
+                                <p className="text-base font-medium text-gray-900">
+                                  Order #{order.id?.slice(0, 8) || "N/A"}
+                                </p>
+                                <p className="text-sm text-gray-600">{order.serviceTitle || "Unknown"}</p>
+                                <p className="text-xs text-gray-500">
+                                  Created: {formatTimestamp(order.createdAt)}
+                                </p>
+                                <p className="text-xs text-gray-500">
+                                  Booking: {formatTimestamp(order.bookingDate)}
+                                </p>
+                              </div>
+                              <span
+                                className={`px-2 py-1 rounded text-xs font-semibold ${
+                                  order.status?.toUpperCase() === "PENDING"
+                                    ? "bg-orange-100 text-orange-600"
+                                    : order.status?.toUpperCase() === "ACCEPTED" || order.status?.toUpperCase() === "IN_PROGRESS"
+                                    ? "bg-green-100 text-green-600"
+                                    : order.status?.toUpperCase() === "REJECTED"
+                                    ? "bg-red-100 text-red-600"
+                                    : order.status?.toUpperCase() === "COMPLETED"
+                                    ? "bg-blue-100 text-blue-600"
+                                    : order.status?.toUpperCase() === "CANCELLED"
+                                    ? "bg-gray-100 text-gray-600"
+                                    : "bg-gray-100 text-gray-600"
+                                }`}
+                              >
+                                {order.status || "Unknown"}
+                              </span>
                             </div>
-                            <span
-                              className={`px-2 py-1 rounded text-xs font-semibold ${
-                                order.status === "PENDING"
-                                  ? "bg-orange-100 text-orange-600"
-                                  : order.status === "ACCEPTED" || order.status === "COMPLETED"
-                                  ? "bg-green-100 text-green-600"
-                                  : order.status === "REJECTED"
-                                  ? "bg-red-100 text-red-600"
-                                  : "bg-gray-100 text-gray-600"
-                              }`}
-                            >
-                              {order.status || "Unknown"}
-                            </span>
+                            {order.status?.toUpperCase() === "PENDING" && (
+                              <div className="flex justify-end gap-2 mt-2">
+                                <button
+                                  onClick={() => handleOrderUpdate(order.id, "ACCEPTED")}
+                                  className="flex items-center gap-1 px-3 py-1 bg-cyan-400 text-gray-900 text-sm font-medium rounded-md hover:bg-cyan-500 hover:shadow-md disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+                                  disabled={!order.id}
+                                  aria-label="Accept order"
+                                >
+                                  <FaRegCheckCircle /> Accept
+                                </button>
+                                <button
+                                  onClick={() => handleOrderUpdate(order.id, "REJECTED")}
+                                  className="flex items-center gap-1 px-3 py-1 bg-red-500 text-white text-sm font-medium rounded-md hover:bg-red-600 hover:shadow-md disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+                                  disabled={!order.id}
+                                  aria-label="Reject order"
+                                >
+                                  <FaRegTimesCircle /> Reject
+                                </button>
+                              </div>
+                            )}
+                            {(order.status?.toUpperCase() === "ACCEPTED" || order.status?.toUpperCase() === "IN_PROGRESS") && (
+                              <div className="flex justify-end gap-2 mt-2">
+                                <button
+                                  onClick={() => handleOrderUpdate(order.id, "COMPLETED")}
+                                  className="flex items-center gap-1 px-3 py-1 bg-green-500 text-white text-sm font-medium rounded-md hover:bg-green-600 hover:shadow-md disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+                                  disabled={!order.id}
+                                  aria-label="Complete order"
+                                >
+                                  <FaRegCheckCircle /> Complete
+                                </button>
+                              </div>
+                            )}
                           </div>
-                          {order.status === "PENDING" && (
-                            <div className="flex justify-end gap-2 mt-2">
-                              <button
-                                onClick={() => handleOrderUpdate(order.id, "ACCEPTED")}
-                                className="flex items-center gap-1 px-3 py-1 bg-cyan-400 text-gray-900 text-sm font-medium rounded-md hover:bg-cyan-500 hover:shadow-md disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
-                                disabled={!order.id}
-                                aria-label="Accept order"
-                              >
-                                <FaRegCheckCircle /> Accept
-                              </button>
-                              <button
-                                onClick={() => handleOrderUpdate(order.id, "REJECTED")}
-                                className="flex items-center gap-1 px-3 py-1 bg-red-500 text-white text-sm font-medium rounded-md hover:bg-red-600 hover:shadow-md disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
-                                disabled={!order.id}
-                                aria-label="Reject order"
-                              >
-                                <FaRegTimesCircle /> Reject
-                              </button>
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                      {sellerOrders.newOrders.length > 4 && (
+                        ))}
+                      {sellerOrders.newOrders.filter((order) =>
+                        ["PENDING", "ACCEPTED", "IN_PROGRESS"].includes(order.status?.toUpperCase())
+                      ).length > 4 && (
                         <button
                           onClick={handleViewAllOrders}
                           className="text-cyan-400 text-sm font-medium flex items-center gap-1 mt-4 ml-auto hover:text-cyan-500 transition-colors"
-                          aria-label="View all new orders"
+                          aria-label="View all new orders to deliver"
                         >
-                          View all ({sellerOrders.newOrders.length}) <FaChevronRight size={12} />
+                          View all (
+                          {sellerOrders.newOrders.filter((order) =>
+                            ["PENDING", "ACCEPTED", "IN_PROGRESS"].includes(order.status?.toUpperCase())
+                          ).length}
+                          ) <FaChevronRight size={12} />
                         </button>
                       )}
                     </div>
                   ) : (
-                    <p className="text-sm text-gray-600 text-center py-4">No new orders to deliver</p>
+                    <p className="text-sm text-gray-600 text-center py-4">
+                      No new orders to deliver
+                    </p>
                   )}
                 </div>
               </CSSTransition>
@@ -550,83 +645,102 @@ function Dashboard() {
                 <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
                   <FaShoppingCart className="text-cyan-400" /> Your Orders
                 </h2>
-                {collapsedSections.yourOrders ? (
-                  <FaChevronDown className="text-gray-600" />
-                ) : (
-                  <FaChevronUp className="text-gray-600" />
-                )}
               </button>
               <CSSTransition in={!collapsedSections.yourOrders} timeout={300} classNames="slide" unmountOnExit>
                 <div id="your-orders-section">
-                  {isLoading || !isDataReady || !orders ? (
+                  {isLoading || !isDataReady ? (
                     <div className="space-y-3">
                       <SkeletonLoader />
                       <SkeletonLoader />
                     </div>
-                  ) : orders.length > 0 ? (
-                    <div>
-                      {orders
-                        .filter((order) => order.role === "BUYER")
-                        .slice(0, 4)
-                        .map((order) => (
-                          <div
-                            key={order.id}
-                            className="py-3 border-b border-gray-200 hover:bg-gray-100 transition-colors"
-                          >
-                            <div className="flex justify-between items-center">
-                              <div>
-                                <p className="text-base font-medium text-gray-900">
-                                  Order #{order.id?.slice(0, 8) || "N/A"}
-                                </p>
-                                <p className="text-sm text-gray-600">{order.serviceTitle || "Unknown"}</p>
-                                <p className="text-xs text-gray-500">{formatTimestamp(order.createdAt)}</p>
+                  ) : !orders || orders.length === 0 ? (
+                    <p className="text-sm text-gray-600 text-center py-4">
+                      No orders found. <Link to="/services" className="text-cyan-400 hover:text-cyan-500">Explore services</Link>.
+                    </p>
+                  ) : (() => {
+                    const activeOrders = orders.filter((order) => {
+                      const orderRole = order.role?.toUpperCase() || "BUYER";
+                      if (orderRole !== "BUYER") {
+                        console.log(`Order ${order.id} skipped: role is ${orderRole}`);
+                        return false;
+                      }
+                      const status = order.status?.toUpperCase() || "";
+                      const isActive = ["PENDING", "ACCEPTED", "IN_PROGRESS"].includes(status);
+                      if (!isActive) {
+                        console.log(`Order ${order.id} skipped: status is ${status}`);
+                      }
+                      return isActive;
+                    });
+                    console.log("Your Orders filtered:", activeOrders.map(o => ({ id: o.id, status: o.status, role: o.role })));
+                    return activeOrders.length > 0 ? (
+                      <div>
+                        {activeOrders.slice(0, 4).map((order) => {
+                          console.log("Your Orders order:", { id: order.id, serviceId: order.serviceId, status: order.status, role: order.role });
+                          return (
+                            <div
+                              key={order.id}
+                              className="py-3 border-b border-gray-200 hover:bg-gray-100 transition-colors"
+                            >
+                              <div className="flex justify-between items-center">
+                                <div>
+                                  <p className="text-base font-medium text-gray-900">
+                                    Order #{order.id?.slice(0, 8) || "N/A"}
+                                  </p>
+                                  <p className="text-sm text-gray-600">{order.serviceTitle || "Unknown"}</p>
+                                  <p className="text-xs text-gray-500">
+                                    Created: {formatTimestamp(order.createdAt)}
+                                  </p>
+                                  <p className="text-xs text-gray-500">
+                                    Booking: {formatTimestamp(order.bookingDate)}
+                                  </p>
+                                </div>
+                                <span
+                                  className={`px-2 py-1 rounded text-xs font-semibold ${
+                                    order.status?.toUpperCase() === "PENDING"
+                                      ? "bg-orange-100 text-orange-600"
+                                      : order.status?.toUpperCase() === "ACCEPTED" || order.status?.toUpperCase() === "IN_PROGRESS"
+                                      ? "bg-green-100 text-green-600"
+                                      : "bg-gray-100 text-gray-600"
+                                  }`}
+                                >
+                                  {order.status || "Unknown"}
+                                </span>
                               </div>
-                              <span
-                                className={`px-2 py-1 rounded text-xs font-semibold ${
-                                  order.status === "PENDING"
-                                    ? "bg-orange-100 text-orange-600"
-                                    : order.status === "ACCEPTED" || order.status === "COMPLETED"
-                                    ? "bg-green-100 text-green-600"
-                                    : order.status === "REJECTED"
-                                    ? "bg-red-100 text-red-600"
-                                    : "bg-gray-100 text-gray-600"
-                                }`}
-                              >
-                                {order.status || "Unknown"}
-                              </span>
+                              <div className="flex justify-end gap-2 mt-2">
+                                <button
+                                  onClick={() =>
+                                    openChat({
+                                      id: order.sellerId,
+                                      name: order.sellerName,
+                                      image: order.sellerImage || null,
+                                    })
+                                  }
+                                  className="flex items-center gap-1 px-3 py-1 bg-cyan-400 text-gray-900 text-sm font-medium rounded-md hover:bg-cyan-500 hover:shadow-md disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+                                  disabled={!order.sellerId}
+                                  aria-label="Chat with seller"
+                                >
+                                  Chat with Seller
+                                </button>
+                              </div>
                             </div>
-                            <div className="flex justify-end mt-2">
-                              <button
-                                onClick={() =>
-                                  openChat({
-                                    id: order.sellerId,
-                                    name: order.sellerName,
-                                    image: order.sellerImage || null,
-                                  })
-                                }
-                                className="flex items-center gap-1 px-3 py-1 bg-cyan-400 text-gray-900 text-sm font-medium rounded-md hover:bg-cyan-500 hover:shadow-md disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
-                                disabled={!order.sellerId}
-                                aria-label="Chat with seller"
-                              >
-                                Chat with Seller
-                              </button>
-                            </div>
-                          </div>
-                        ))}
-                      {orders.filter((order) => order.role === "BUYER").length > 4 && (
-                        <button
-                          onClick={handleViewAllOrders}
-                          className="text-cyan-400 text-sm font-medium flex items-center gap-1 mt-4 ml-auto hover:text-cyan-500 transition-colors"
-                          aria-label="View all orders"
-                        >
-                          View all ({orders.filter((order) => order.role === "BUYER").length}){" "}
-                          <FaChevronRight size={12} />
-                        </button>
-                      )}
-                    </div>
-                  ) : (
-                    <p className="text-sm text-gray-600 text-center py-4">No orders placed yet</p>
-                  )}
+                          );
+                        })}
+                        {activeOrders.length > 4 && (
+                          <button
+                            onClick={handleViewAllOrders}
+                            className="text-cyan-400 text-sm font-medium flex items-center gap-1 mt-4 ml-auto hover:text-cyan-500 transition-colors"
+                            aria-label="View all active orders"
+                          >
+                            View all ({activeOrders.length}) <FaChevronRight size={12} />
+                          </button>
+                        )}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-gray-600 text-center py-4">
+                        No active orders (Pending, Accepted, In Progress).
+                      </p>
+                    );
+                  })()}
                 </div>
               </CSSTransition>
             </section>
@@ -664,95 +778,145 @@ function Dashboard() {
                 <h2 className="text-lg font-semibold text-gray-900 flex items-center gap-2">
                   <FaHistory className="text-cyan-400" /> Order History
                 </h2>
-                {collapsedSections.history ? (
-                  <FaChevronDown className="text-gray-600" />
-                ) : (
-                  <FaChevronUp className="text-gray-600" />
-                )}
               </button>
               <CSSTransition in={!collapsedSections.history} timeout={300} classNames="slide" unmountOnExit>
                 <div id="history-section">
-                  {isLoading || !isDataReady || (!sellerOrders?.orderHistory && !orders) ? (
+                  {isLoading || !isDataReady ? (
                     <div className="space-y-3">
                       <SkeletonLoader />
                       <SkeletonLoader />
                     </div>
-                  ) : (sellerOrders?.orderHistory || orders || []).length > 0 ? (
-                    <div>
-                      {[
-                        ...(user?.isSeller || user?.role?.toLowerCase() === "both"
-                          ? sellerOrders?.orderHistory || []
-                          : orders?.filter((order) => order.role === "BUYER") || []),
-                      ]
-                        .slice(0, 5)
-                        .map((order) => (
-                          <div
-                            key={order.id}
-                            className="py-3 border-b border-gray-200 hover:bg-gray-100 transition-colors"
-                          >
-                            <div className="flex justify-between items-center">
-                              <div>
-                                <p className="text-base font-medium text-gray-900">
-                                  Order #{order.id?.slice(0, 8) || "N/A"}
-                                </p>
-                                <p className="text-sm text-gray-600">{order.serviceTitle || "Unknown"}</p>
-                                <p className="text-xs text-gray-500">{formatTimestamp(order.createdAt)}</p>
-                              </div>
-                              <span
-                                className={`px-2 py-1 rounded text-xs font-semibold ${
-                                  order.status === "PENDING"
-                                    ? "bg-orange-100 text-orange-600"
-                                    : order.status === "ACCEPTED" || order.status === "COMPLETED"
-                                    ? "bg-green-100 text-green-600"
-                                    : order.status === "REJECTED"
-                                    ? "bg-red-100 text-red-600"
-                                    : "bg-gray-100 text-gray-600"
-                                }`}
-                              >
-                                {order.status || "Unknown"}
-                              </span>
-                            </div>
-                            {!(user?.isSeller || user?.role?.toLowerCase() === "both") && (
-                              <div className="flex justify-end mt-2">
-                                <button
-                                  onClick={() =>
-                                    openChat({
-                                      id: order.sellerId,
-                                      name: order.sellerName,
-                                      image: order.sellerImage || null,
-                                    })
-                                  }
-                                  className="flex items-center gap-1 px-3 py-1 bg-cyan-400 text-gray-900 text-sm font-medium rounded-md hover:bg-cyan-500 hover:shadow-md disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
-                                  disabled={!order.sellerId}
-                                  aria-label="Chat with seller"
+                  ) : !orders && !sellerOrders?.orderHistory ? (
+                    <p className="text-sm text-gray-600 text-center py-4">
+                      No order history available.
+                    </p>
+                  ) : (() => {
+                    const historyOrders = [
+                      ...(user?.isSeller || user?.role?.toLowerCase() === "both"
+                        ? sellerOrders?.orderHistory || []
+                        : orders?.filter((order) => {
+                            const orderRole = order.role?.toUpperCase() || "BUYER";
+                            if (orderRole !== "BUYER") {
+                              console.log(`Order ${order.id} skipped in history: role is ${orderRole}`);
+                              return false;
+                            }
+                            const status = order.status?.toUpperCase() || "";
+                            const isHistory = ["COMPLETED", "REJECTED", "CANCELLED"].includes(status);
+                            if (!isHistory) {
+                              console.log(`Order ${order.id} skipped in history: status is ${status}`);
+                            }
+                            return isHistory;
+                          }) || []),
+                    ];
+                    console.log("Order History filtered:", historyOrders.map(o => ({ id: o.id, status: o.status, role: o.role })));
+                    return historyOrders.length > 0 ? (
+                      <div>
+                        {historyOrders.slice(0, 5).map((order) => {
+                          console.log("Order History order:", { id: order.id, serviceId: order.serviceId, status: order.status, role: order.role });
+                          const isReviewed = reviewedOrders.has(order.id);
+                          return (
+                            <div
+                              key={order.id}
+                              className="py-3 border-b border-gray-200 hover:bg-gray-100 transition-colors"
+                            >
+                              <div className="flex justify-between items-center">
+                                <div>
+                                  <p className="text-base font-medium text-gray-900">
+                                    Order #{order.id?.slice(0, 8) || "N/A"}
+                                  </p>
+                                  <p className="text-sm text-gray-600">{order.serviceTitle || "Unknown"}</p>
+                                  <p className="text-xs text-gray-500">
+                                    Created: {formatTimestamp(order.createdAt)}
+                                  </p>
+                                  <p className="text-xs text-gray-500">
+                                    Booking: {formatTimestamp(order.bookingDate)}
+                                  </p>
+                                </div>
+                                <span
+                                  className={`px-2 py-1 rounded text-xs font-semibold ${
+                                    order.status?.toUpperCase() === "COMPLETED"
+                                      ? "bg-blue-100 text-blue-600"
+                                      : order.status?.toUpperCase() === "REJECTED"
+                                      ? "bg-red-100 text-red-600"
+                                      : order.status?.toUpperCase() === "CANCELLED"
+                                      ? "bg-gray-100 text-gray-600"
+                                      : "bg-gray-100 text-gray-600"
+                                  }`}
                                 >
-                                  Chat with Seller
-                                </button>
+                                  {order.status || "Unknown"}
+                                </span>
                               </div>
-                            )}
-                          </div>
-                        ))}
-                      {[
-                        ...(user?.isSeller || user?.role?.toLowerCase() === "both"
-                          ? sellerOrders?.orderHistory || []
-                          : orders?.filter((order) => order.role === "BUYER") || []),
-                      ].length > 5 && (
-                        <button
-                          onClick={handleViewAllOrders}
-                          className="text-cyan-400 text-sm font-medium flex items-center gap-1 mt-4 ml-auto hover:text-cyan-500 transition-colors"
-                          aria-label="View all order history"
-                        >
-                          View all (
-                          {user?.isSeller || user?.role?.toLowerCase() === "both"
-                            ? sellerOrders?.orderHistory?.length || 0
-                            : orders?.filter((order) => order.role === "BUYER")?.length || 0}
-                          ) <FaChevronRight size={12} />
-                        </button>
-                      )}
-                    </div>
-                  ) : (
-                    <p className="text-sm text-gray-600 text-center py-4">No order history</p>
-                  )}
+                              {order.role?.toUpperCase() === "BUYER" && (
+                                <div className="flex justify-end gap-2 mt-2">
+                                  <button
+                                    onClick={() =>
+                                      openChat({
+                                        id: order.sellerId,
+                                        name: order.sellerName,
+                                        image: order.sellerImage || null,
+                                      })
+                                    }
+                                    className="flex items-center gap-1 px-3 py-1 bg-cyan-400 text-gray-900 text-sm font-medium rounded-md hover:bg-cyan-500 hover:shadow-md disabled:bg-gray-300 disabled:cursor-not-allowed transition-colors"
+                                    disabled={!order.sellerId}
+                                    aria-label="Chat with seller"
+                                  >
+                                    Chat with Seller
+                                  </button>
+                                  {order.status?.toUpperCase() === "COMPLETED" && (
+                                    isReviewed ? (
+                                      <button
+                                        className="flex items-center gap-1 px-3 py-1 bg-gray-300 text-gray-600 text-sm font-medium rounded-md cursor-not-allowed transition-colors"
+                                        disabled
+                                        aria-label="Service reviewed"
+                                      >
+                                        <FaStar /> Reviewed
+                                      </button>
+                                    ) : (
+                                      <button
+                                        onClick={() =>
+                                          setShowReviewForm((prev) => ({
+                                            ...prev,
+                                            [order.id]: !prev[order.id],
+                                          }))
+                                        }
+                                        className="flex items-center gap-1 px-3 py-1 bg-yellow-400 text-gray-900 text-sm font-medium rounded-md hover:bg-yellow-500 hover:shadow-md transition-colors"
+                                        aria-label="Review service"
+                                      >
+                                        <FaStar /> Review
+                                      </button>
+                                    )
+                                  )}
+                                </div>
+                              )}
+                              {showReviewForm[order.id] && order.status?.toUpperCase() === "COMPLETED" && order.role?.toUpperCase() === "BUYER" && (
+                                <ReviewModal
+                                  orderId={order.id}
+                                  serviceId={order.serviceId || order.service?.id}
+                                  onSubmit={handleSubmitReview}
+                                  onClose={() =>
+                                    setShowReviewForm((prev) => ({ ...prev, [order.id]: false }))
+                                  }
+                                />
+                              )}
+                            </div>
+                          );
+                        })}
+                        {historyOrders.length > 5 && (
+                          <button
+                            onClick={handleViewAllOrders}
+                            className="text-cyan-400 text-sm font-medium flex items-center gap-1 mt-4 ml-auto hover:text-cyan-500 transition-colors"
+                            aria-label="View all order history"
+                          >
+                            View all ({historyOrders.length}) <FaChevronRight size={12} />
+                          </button>
+                        )}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-gray-600 text-center py-4">
+                        No order history (Completed, Rejected, Cancelled).
+                      </p>
+                    );
+                  })()}
                 </div>
               </CSSTransition>
             </section>

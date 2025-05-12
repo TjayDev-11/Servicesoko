@@ -202,12 +202,11 @@ const useStore = create((set) => ({
         headers: { Authorization: `Bearer ${useStore.getState().token}` },
       });
       const updatedUser = response.data?.user || response.data;
-      console.log("Profile fetched:", updatedUser); // Debug log
+      console.log("Profile fetched:", updatedUser);
 
-      // Validate profilePhoto in the response
       if (updatedUser.profilePhoto) {
         const fullProfilePhotoUrl = `${BACKEND_URL}${updatedUser.profilePhoto}`;
-        console.log("Profile photo URL:", fullProfilePhotoUrl); // e.g., http://localhost:5000/Uploads/profiles/1747050809882-191896755.jpeg
+        console.log("Profile photo URL:", fullProfilePhotoUrl);
       } else {
         console.log("No profile photo in response");
       }
@@ -480,6 +479,31 @@ const useStore = create((set) => ({
     }
   },
 
+  submitReview: async ({ orderId, rating, comment }) => {
+    set({ ordersLoading: true });
+    try {
+      console.log(`Submitting review for order ${orderId}`);
+      const response = await api.post(
+        `/api/orders/${orderId}/review`,
+        { rating, comment },
+        {
+          headers: { Authorization: `Bearer ${useStore.getState().token}` },
+        }
+      );
+      console.log(`Review submitted for order ${orderId}:`, response.data);
+      set({ ordersLoading: false });
+      return response.data;
+    } catch (error) {
+      console.error("Review submission error:", {
+        message: error.message,
+        status: error.response?.status,
+        data: error.response?.data,
+      });
+      set({ ordersLoading: false });
+      throw error;
+    }
+  },
+
   updateProfile: async (formData) => {
     set({ isLoading: true });
     try {
@@ -492,10 +516,8 @@ const useStore = create((set) => ({
       });
       console.log("Profile update response:", response.data);
 
-      // Invalidate profile cache
       cache.profile = { data: null, timestamp: null, ttl: cache.profile.ttl };
 
-      // Refresh user to get updated profile data
       const updatedUser = await useStore.getState().refreshUser();
       console.log("User state after profile update:", updatedUser);
 
