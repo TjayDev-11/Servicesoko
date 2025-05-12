@@ -3,12 +3,15 @@ import { jwtDecode } from "jwt-decode";
 import axios from "axios";
 
 const api = axios.create({ baseURL: import.meta.env.VITE_API_URL });
+const BACKEND_URL = "http://localhost:5000";
 
 const cache = {
   services: { data: null, timestamp: null, ttl: 5 * 60 * 1000 },
   userServices: { data: null, timestamp: null, ttl: 5 * 60 * 1000 },
+  profile: { data: null, timestamp: null, ttl: 2 * 60 * 1000 },
 };
 let lastRefreshTime = 0;
+
 const useStore = create((set) => ({
   token: localStorage.getItem("authToken") || null,
   user: null,
@@ -51,6 +54,7 @@ const useStore = create((set) => ({
     localStorage.removeItem("refreshToken");
     cache.services = { data: null, timestamp: null, ttl: cache.services.ttl };
     cache.userServices = { data: null, timestamp: null, ttl: cache.userServices.ttl };
+    cache.profile = { data: null, timestamp: null, ttl: cache.profile.ttl };
     set({
       token: null,
       user: null,
@@ -180,26 +184,38 @@ const useStore = create((set) => ({
   refreshUser: async () => {
     const now = Date.now();
     if (now - lastRefreshTime < 5000) {
+      console.log("Skipping refreshUser: called too soon");
       return useStore.getState().user;
     }
     lastRefreshTime = now;
 
     if (cache.profile.data && now - cache.profile.timestamp < cache.profile.ttl) {
+      console.log("Using cached profile data:", cache.profile.data);
       set({ user: cache.profile.data });
       return cache.profile.data;
     }
 
     set({ isLoading: true });
     try {
+      console.log("Fetching user profile from /api/profile");
       const response = await api.get("/api/profile", {
         headers: { Authorization: `Bearer ${useStore.getState().token}` },
       });
       const updatedUser = response.data?.user || response.data;
-      
+      console.log("Profile fetched:", updatedUser); // Debug log
+
+      // Validate profilePhoto in the response
+      if (updatedUser.profilePhoto) {
+        const fullProfilePhotoUrl = `${BACKEND_URL}${updatedUser.profilePhoto}`;
+        console.log("Profile photo URL:", fullProfilePhotoUrl); // e.g., http://localhost:5000/Uploads/profiles/1747050809882-191896755.jpeg
+      } else {
+        console.log("No profile photo in response");
+      }
+
       cache.profile = {
         data: updatedUser,
         timestamp: now,
-        ttl: 2 * 60 * 1000
+        ttl: 2 * 60 * 1000,
       };
 
       set({
@@ -209,12 +225,19 @@ const useStore = create((set) => ({
       });
       return updatedUser;
     } catch (error) {
-      console.error("Refresh user error:", error);
+      console.error("Refresh user error:", {
+        message: error.message,
+        status: error.response?.status,
+        data: error.response?.data,
+      });
       if (error.response?.status === 401 || error.response?.status === 403) {
+        console.log("401/403 error, attempting token refresh");
         const refreshed = await useStore.getState().refreshToken();
         if (refreshed) {
+          console.log("Token refreshed, retrying refreshUser");
           return await useStore.getState().refreshUser();
         }
+        console.log("Token refresh failed, clearing state and redirecting");
         set({
           isLoading: false,
           isAuthenticated: false,
@@ -253,7 +276,11 @@ const useStore = create((set) => ({
         servicesLoading: false,
       });
     } catch (error) {
-      console.error("Fetch services error:", error);
+      console.error("Fetch services error:", {
+        message: error.message,
+        status: error.response?.status,
+        data: error.response?.data,
+      });
       set({
         services: [],
         servicesLoading: false,
@@ -284,6 +311,7 @@ const useStore = create((set) => ({
       console.error("Fetch user services error:", {
         message: error.message,
         status: error.response?.status,
+        data: error.response?.data,
       });
       set({ userServicesLoading: false });
       throw error;
@@ -325,6 +353,7 @@ const useStore = create((set) => ({
       console.error("Fetch orders error:", {
         message: error.message,
         status: error.response?.status,
+        data: error.response?.data,
       });
       set({ ordersLoading: false });
       throw error;
@@ -342,6 +371,7 @@ const useStore = create((set) => ({
       console.error("Fetch seller orders error:", {
         message: error.message,
         status: error.response?.status,
+        data: error.response?.data,
       });
       set({ sellerOrdersLoading: false });
       throw error;
@@ -368,6 +398,7 @@ const useStore = create((set) => ({
       console.error("Fetch conversations error:", {
         message: error.message,
         status: error.response?.status,
+        data: error.response?.data,
       });
       set({ conversations: [], unreadMessagesCount: 0 });
       throw error;
@@ -452,21 +483,30 @@ const useStore = create((set) => ({
   updateProfile: async (formData) => {
     set({ isLoading: true });
     try {
+      console.log("Updating profile with form data:", formData);
       const response = await api.put("/api/profile", formData, {
         headers: {
           Authorization: `Bearer ${useStore.getState().token}`,
           "Content-Type": "multipart/form-data",
         },
       });
-      
+      console.log("Profile update response:", response.data);
+
       // Invalidate profile cache
       cache.profile = { data: null, timestamp: null, ttl: cache.profile.ttl };
-      
+
+      // Refresh user to get updated profile data
       const updatedUser = await useStore.getState().refreshUser();
+      console.log("User state after profile update:", updatedUser);
+
       set({ isLoading: false });
       return updatedUser;
     } catch (error) {
-      console.error("Profile update error:", error);
+      console.error("Profile update error:", {
+        message: error.message,
+        status: error.response?.status,
+        data: error.response?.data,
+      });
       set({ isLoading: false });
       throw error;
     }

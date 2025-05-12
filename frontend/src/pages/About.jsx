@@ -33,7 +33,7 @@ function About() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-black flex items-center justify-center py-16 px-4 sm:px-6 lg:px-8">
+    <div className="min-h-screen bg-white flex items-center justify-center py-16 px-4 sm:px-6 lg:px-8">
       <div
         ref={sectionRef}
         className="w-full max-w-4xl bg-gray-800 rounded-xl p-8 sm:p-10 shadow-2xl border border-white border-opacity-10 opacity-0"

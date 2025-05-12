@@ -124,10 +124,10 @@ function App() {
   return (
     <Router>
       <div
-        style={{ minHeight: "100vh", display: "flex", flexDirection: "column" }}
+        style={{ minHeight: "100vh", width:"100%", display: "flex", flexDirection: "column" }}
       >
         <Navbar />
-        <div style={{ flex: 1 }}>
+        <div style={{ flex: 1,  minWidth:"100%"}}>
           <Routes>
             <Route path="/" element={<Home />} />
             <Route

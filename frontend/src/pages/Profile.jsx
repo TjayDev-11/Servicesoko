@@ -21,15 +21,19 @@ function Profile() {
     location: "",
     phone: "",
     services: "",
+    bio: "",
     profilePhoto: null,
   });
   const [servicesList, setServicesList] = useState([]);
   const [isEditing, setIsEditing] = useState(false);
   const [feedback, setFeedback] = useState(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [tempPhotoUrl, setTempPhotoUrl] = useState(null); // Local state for blob URL
   const navigate = useNavigate();
   const sectionRef = useRef(null);
   const cardRefs = useRef([]);
+
+  const BACKEND_URL = "http://localhost:5000";
 
   // Animation observer
   useEffect(() => {
@@ -58,6 +62,20 @@ function Profile() {
     };
   }, []);
 
+  // Cleanup blob URLs
+  useEffect(() => {
+    let url;
+    if (form.profilePhoto && typeof form.profilePhoto !== "string") {
+      url = URL.createObjectURL(form.profilePhoto);
+    } else if (form.profilePhoto && typeof form.profilePhoto === "string") {
+      url = `${BACKEND_URL}${form.profilePhoto}`; // e.g., http://localhost:5000/Uploads/profiles/1747050809882-191896755.jpeg
+      console.log("Image URL set to:", url); // Debug log
+    }
+    return () => {
+      if (url && typeof url === "string") URL.revokeObjectURL(url);
+    };
+  }, [form.profilePhoto]);
+
   // Authentication check
   useEffect(() => {
     if (!token) {
@@ -78,8 +96,10 @@ function Profile() {
         location: user.location || user?.sellerProfile?.location || "",
         phone: user.phone || user?.sellerProfile?.phone || "",
         services: user?.sellerProfile?.services?.join(", ") || "",
+        bio: user.bio || user?.sellerProfile?.bio || "",
         profilePhoto: user.profilePhoto || user?.sellerProfile?.profilePhoto || null,
       };
+      console.log("Updated form with user data:", newForm);
       setForm(newForm);
 
       const serviceTitles =
@@ -115,6 +135,7 @@ function Profile() {
       formData.append("email", form.email.trim());
       formData.append("phone", form.phone.trim());
       formData.append("location", form.location.trim());
+      formData.append("bio", form.bio.trim());
 
       if (form.role !== "buyer" && form.services) {
         formData.append("services", form.services.trim());
@@ -122,14 +143,20 @@ function Profile() {
       if (form.profilePhoto && typeof form.profilePhoto !== "string") {
         formData.append("profilePhoto", form.profilePhoto);
       }
+      console.log("Sending form data:", Object.fromEntries(formData));
 
-      await updateProfile(formData);
+      const response = await updateProfile(formData);
+      console.log("Update profile response:", response);
+
+      // Force refresh user data to get the updated profile photo
+      await refreshUser(token);
       setFeedback({ message: "Profile updated successfully!", type: "success" });
       setIsEditing(false);
       setTimeout(() => setFeedback(null), 3000);
     } catch (error) {
+      console.error("Update error:", error.response?.data || error);
       setFeedback({
-        message: error.message || "Update failed. Please try again.",
+        message: error.response?.data?.message || error.message || "Update failed. Please try again.",
         type: "error",
       });
       setTimeout(() => setFeedback(null), 3000);
@@ -154,15 +181,8 @@ function Profile() {
     <div className="min-h-screen bg-gray-50 py-12 px-4 sm:px-6 lg:px-8">
       <div
         ref={sectionRef}
-        className="max-w-4xl mx-auto bg-white rounded-lg p-6 sm:p-8 shadow-sm border border-gray-200"
+        className="max-w-5xl mx-auto bg-white rounded-lg p-6 sm:p-8 shadow-sm border border-gray-200"
       >
-        <div className="text-center mb-6">
-          <h1 className="text-2xl sm:text-3xl font-semibold text-gray-900 mb-2">
-            My Profile
-          </h1>
-          <p className="text-sm text-gray-600">Manage your account information</p>
-        </div>
-
         {feedback && (
           <div
             className={`p-3 rounded-md mb-4 text-sm flex items-center gap-2 animate-fadeInUp animation-delay-100 ${
@@ -181,19 +201,25 @@ function Profile() {
           </div>
         )}
 
-        <div className="flex flex-col lg:flex-row gap-6">
+        <h1 className="text-2xl font-semibold text-gray-900 mb-6 animate-fadeInUp">My Profile</h1>
+
+        <div className="flex flex-col lg:flex-row gap-8">
           {/* Profile Picture Section */}
-          <div className="flex flex-col items-center lg:-mt-20">
+          <div className="flex flex-col items-center">
             <div className="w-32 h-32 rounded-full overflow-hidden bg-gray-200 flex items-center justify-center border-2 border-cyan-400 relative">
               {form.profilePhoto ? (
                 <img
-                  src={`${
+                  src={
                     typeof form.profilePhoto === "string"
-                      ? form.profilePhoto
-                      : URL.createObjectURL(form.profilePhoto)
-                  }?t=${new Date().getTime()}`}
+                      ? `${BACKEND_URL}${form.profilePhoto}?t=${new Date().getTime()}`
+                      : tempPhotoUrl
+                  }
                   alt="Profile"
                   className="w-full h-full object-cover"
+                  onError={(e) => {
+                    console.error("Failed to load profile photo:", form.profilePhoto);
+                    e.target.style.display = "none"; // Hide broken image
+                  }}
                 />
               ) : (
                 <span className="text-5xl font-bold text-gray-900">
@@ -206,18 +232,68 @@ function Profile() {
                   <input
                     type="file"
                     accept="image/*"
-                    onChange={(e) =>
-                      setForm({ ...form, profilePhoto: e.target.files[0] })
-                    }
+                    onChange={(e) => {
+                      const file = e.target.files[0];
+                      setForm({ ...form, profilePhoto: file });
+                    }}
                     className="hidden"
                   />
                 </label>
               )}
             </div>
+          </div>
 
-            <div className="mt-4 space-y-3 w-full max-w-xs">
+          {/* Profile Details Section */}
+          <div className="flex-1 flex flex-col gap-6">
+            <div className="bg-gray-50 rounded-lg p-4 shadow-sm animate-fadeInUp animation-delay-200">
               {isEditing ? (
-                <div className="space-y-3">
+                <form onSubmit={handleSubmit} className="space-y-4">
+                  <div className="flex items-center justify-center mb-4">
+                    <div className="w-32 h-32 rounded-full overflow-hidden bg-gray-200 flex items-center justify-center border-2 border-cyan-400 relative">
+                      {form.profilePhoto ? (
+                        <img
+                          src={
+                            typeof form.profilePhoto === "string"
+                              ? `${form.profilePhoto}?t=${new Date().getTime()}`
+                              : tempPhotoUrl
+                          }
+                          alt="Profile"
+                          className="w-full h-full object-cover"
+                          onError={(e) => {
+                            console.error("Failed to load profile photo:", form.profilePhoto);
+                            e.target.style.display = "none"; // Hide broken image
+                          }}
+                        />
+                      ) : (
+                        <span className="text-5xl font-bold text-gray-900">
+                          {getInitial(form.name)}
+                        </span>
+                      )}
+                      <label className="absolute bottom-0 right-0 bg-cyan-400 text-white p-2 rounded-full cursor-pointer hover:bg-cyan-500 transition-all">
+                        <FiEdit className="text-sm" />
+                        <input
+                          type="file"
+                          accept="image/*"
+                          onChange={(e) => {
+                            const file = e.target.files[0];
+                            setForm({ ...form, profilePhoto: file });
+                          }}
+                          className="hidden"
+                        />
+                      </label>
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Name
+                    </label>
+                    <input
+                      type="text"
+                      value={form.name}
+                      onChange={(e) => setForm({ ...form, name: e.target.value })}
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-cyan-400"
+                    />
+                  </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
                       Email
@@ -229,45 +305,19 @@ function Profile() {
                       className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-cyan-400"
                     />
                   </div>
-                </div>
-              ) : (
-                <>
-                  <div className="flex items-center gap-3 py-2 px-3 bg-gray-50 rounded-lg">
-                    <FiMail className="text-cyan-400" />
-                    <span className="text-sm">{form.email}</span>
-                  </div>
-                  <div className="flex items-center gap-3 py-2 px-3 bg-gray-50 rounded-lg">
-                    <FiMapPin className="text-cyan-400" />
-                    <span className="text-sm">
-                      {form.location || "Not provided"}
-                    </span>
-                  </div>
-                  <div className="flex items-center gap-3 py-2 px-3 bg-gray-50 rounded-lg">
-                    <FiPhone className="text-cyan-400" />
-                    <span className="text-sm">{form.phone || "Not provided"}</span>
-                  </div>
-                </>
-              )}
-            </div>
-          </div>
-
-          {/* Profile Details Section */}
-          <div className="flex-1">
-            <div className="mb-6">
-              {isEditing ? (
-                <div className="space-y-4">
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Full Name
-                    </label>
-                    <input
-                      type="text"
-                      value={form.name}
-                      onChange={(e) => setForm({ ...form, name: e.target.value })}
-                      className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-cyan-400"
-                    />
-                  </div>
-                  
+                  {(form.role === "seller" || form.role === "both") && (
+                    <div>
+                      <label className="block text-sm font-medium text-gray-700 mb-1">
+                        Bio
+                      </label>
+                      <textarea
+                        value={form.bio}
+                        onChange={(e) => setForm({ ...form, bio: e.target.value })}
+                        className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-cyan-400"
+                        rows="3"
+                      />
+                    </div>
+                  )}
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
                       Location
@@ -279,7 +329,17 @@ function Profile() {
                       className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-cyan-400"
                     />
                   </div>
-                  
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Role
+                    </label>
+                    <input
+                      type="text"
+                      value={form.role.charAt(0).toUpperCase() + form.role.slice(1)}
+                      disabled
+                      className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-100"
+                    />
+                  </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
                       Phone Number
@@ -291,7 +351,6 @@ function Profile() {
                       className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-cyan-400"
                     />
                   </div>
-                  
                   {(form.role === "seller" || form.role === "both") && (
                     <div>
                       <label className="block text-sm font-medium text-gray-700 mb-1">
@@ -305,26 +364,66 @@ function Profile() {
                       />
                     </div>
                   )}
-                </div>
-              ) : (
-                <>
-                  <div className="flex items-center gap-2 mb-1">
-                    <FiUser className="text-cyan-400" />
-                    <span className="text-lg font-semibold text-gray-900">
-                      {form.name}
-                    </span>
+                  <div className="flex gap-3 mt-6">
+                    <button
+                      type="submit"
+                      disabled={isLoading}
+                      className="flex-1 py-2 bg-cyan-400 text-white font-medium rounded-md flex items-center justify-center gap-2 hover:bg-cyan-500 disabled:opacity-70 transition-all duration-300"
+                    >
+                      {isLoading ? (
+                        <FiLoader className="animate-spin" />
+                      ) : (
+                        <>
+                          <FiSave /> Save Changes
+                        </>
+                      )}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setIsEditing(false)}
+                      disabled={isLoading}
+                      className="flex-1 py-2 bg-white border border-gray-300 text-gray-700 font-medium rounded-md flex items-center justify-center gap-2 hover:bg-gray-50 transition-all duration-300"
+                    >
+                      <FiX /> Cancel
+                    </button>
                   </div>
-                  <div className="flex items-center gap-2 text-sm text-gray-600">
-                    <span className="px-2 py-1 bg-gray-100 rounded-md">
+                </form>
+              ) : (
+                <div className="space-y-3">
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold text-gray-900">Name</span>
+                    <span className="text-gray-600">{form.name}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <FiMail className="text-cyan-400" />
+                    <span className="text-gray-600">{form.email}</span>
+                  </div>
+                  {(form.role === "seller" || form.role === "both") && (
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold text-gray-900">Bio</span>
+                      <span className="text-gray-600">{form.bio || "Not provided"}</span>
+                    </div>
+                  )}
+                  <div className="flex items-center gap-2">
+                    <FiMapPin className="text-cyan-400" />
+                    <span className="text-gray-600">{form.location || "Not provided"}</span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold text-gray-900">Role</span>
+                    <span className="text-gray-600">
                       {form.role.charAt(0).toUpperCase() + form.role.slice(1)}
                     </span>
                   </div>
-                </>
+                  <div className="flex items-center gap-2">
+                    <FiPhone className="text-cyan-400" />
+                    <span className="text-gray-600">{form.phone || "Not provided"}</span>
+                  </div>
+                </div>
               )}
             </div>
 
             {(form.role === "seller" || form.role === "both") && (
-              <div className="mb-6">
+              <div className="bg-white rounded-lg p-4 shadow-sm border border-gray-200 animate-fadeInUp animation-delay-400">
                 <h3 className="text-sm font-medium text-gray-900 mb-2 flex items-center gap-2">
                   <span>Services Offered</span>
                   {servicesList.length === 0 && (
@@ -336,7 +435,7 @@ function Profile() {
                     {servicesList.map((title, idx) => (
                       <span
                         key={idx}
-                        className="px-3 py-1 bg-gray-100 text-gray-800 rounded-full text-sm"
+                        className="px-3 py-1 bg-gray-100 text-gray-800 rounded-full text-sm transition-all duration-300 hover:bg-gray-200"
                       >
                         {title}
                       </span>
@@ -349,42 +448,19 @@ function Profile() {
                 )}
               </div>
             )}
-
-            <div className="mt-6">
-              {isEditing ? (
-                <div className="flex gap-3">
-                  <button
-                    onClick={handleSubmit}
-                    disabled={isLoading}
-                    className="flex-1 py-2 bg-cyan-400 text-white font-medium rounded-md flex items-center justify-center gap-2 hover:bg-cyan-500 disabled:opacity-70"
-                  >
-                    {isLoading ? (
-                      <FiLoader className="animate-spin" />
-                    ) : (
-                      <>
-                        <FiSave /> Save Changes
-                      </>
-                    )}
-                  </button>
-                  <button
-                    onClick={() => setIsEditing(false)}
-                    disabled={isLoading}
-                    className="flex-1 py-2 bg-white border border-gray-300 text-gray-700 font-medium rounded-md flex items-center justify-center gap-2 hover:bg-gray-50"
-                  >
-                    <FiX /> Cancel
-                  </button>
-                </div>
-              ) : (
-                <button
-                  onClick={() => setIsEditing(true)}
-                  className="w-full py-2 px-4 bg-cyan-400 text-white font-medium rounded-md flex items-center justify-center gap-2 hover:bg-cyan-500"
-                >
-                  <FiEdit /> Edit Profile
-                </button>
-              )}
-            </div>
           </div>
         </div>
+
+        {!isEditing && (
+          <div className="mt-6 flex justify-center">
+            <button
+              onClick={() => setIsEditing(true)}
+              className="py-2 px-6 bg-cyan-400 text-white font-medium rounded-md flex items-center justify-center gap-2 hover:bg-cyan-500 transition-all duration-300 animate-fadeInUp animation-delay-600"
+            >
+              <FiEdit /> Edit Profile
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
