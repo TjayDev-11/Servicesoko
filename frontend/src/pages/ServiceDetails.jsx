@@ -1,4 +1,3 @@
-
 import { useParams, useNavigate } from "react-router-dom";
 import { useEffect, useState, useMemo, useCallback } from "react";
 import useStore from "../store";
@@ -23,6 +22,7 @@ function ServiceDetails() {
   const [bookingDate, setBookingDate] = useState("");
   const [bookingStatus, setBookingStatus] = useState(null);
   const navigate = useNavigate();
+  const BACKEND_URL = "http://localhost:5000";
 
   useEffect(() => {
     if (!category) {
@@ -44,35 +44,73 @@ function ServiceDetails() {
 
   const categoryServices = useMemo(() => {
     if (!category) return [];
-    return services.filter(
-      (service) => service.category?.toLowerCase() === category.toLowerCase()
-    );
+    console.log("Category from params:", category);
+    console.log("Raw services:", JSON.stringify(services, null, 2));
+    const filtered = services.filter((service) => {
+      const matches = service.category?.toLowerCase() === category.toLowerCase();
+      console.log(
+        `Service: ${service.title}, Category: ${service.category}, Matches: ${matches}`
+      );
+      return matches;
+    });
+    console.log("Filtered categoryServices:", JSON.stringify(filtered, null, 2));
+    return filtered;
   }, [services, category]);
 
   const allSellers = useMemo(() => {
-    return categoryServices.reduce((sellers, service) => {
-      if (!service.sellers?.length) return sellers;
-      return [
-        ...sellers,
-        ...service.sellers.map((seller) => ({
-          ...seller,
+    const sellers = categoryServices.reduce((sellers, service) => {
+      if (!service.sellers?.length) {
+        console.log(`No sellers for service: ${service.title}`);
+        return sellers;
+      }
+      const mappedSellers = service.sellers.map((seller) => {
+        console.log(`Raw seller data for ${seller.name}:`, JSON.stringify(seller, null, 2));
+        const rating =
+          seller.rating != null && seller.rating > 0
+            ? seller.rating
+            : seller.ratings?.length > 0
+            ? seller.ratings.reduce((sum, r) => sum + r, 0) / seller.ratings.length
+            : null;
+        const photoPath = seller.profilePhoto || seller.image;
+        const normalizedPhotoPath = photoPath?.startsWith('/')
+          ? photoPath
+          : photoPath ? `/${photoPath}` : null;
+        return {
+          id: seller.id,
+          name: seller.name,
           serviceName: service.title,
           serviceId: service.id,
-          // Mock bio for now; replace with actual data from backend
+          category: service.category || categoryInfo.name,
           bio:
+            seller.description ||
             seller.bio ||
-            `Specializing in ${service.title.toLowerCase()} with years of experience.`,
-        })),
-      ];
+            `Specializing in ${service.title.toLowerCase()}.`,
+          profilePhoto: normalizedPhotoPath
+            ? `${BACKEND_URL}${normalizedPhotoPath}`
+            : "https://via.placeholder.com/150",
+          price: seller.price,
+          rating,
+          reviewsCount: seller.reviewsCount || 0,
+          experience: seller.experience || null,
+          location: seller.location || "Not specified",
+          phone: seller.phone || "Not provided",
+        };
+      });
+      console.log(`Mapped sellers for ${service.title}:`, JSON.stringify(mappedSellers, null, 2));
+      return [...sellers, ...mappedSellers];
     }, []);
-  }, [categoryServices]);
+    console.log("All sellers:", JSON.stringify(sellers, null, 2));
+    return sellers;
+  }, [categoryServices, categoryInfo.name]);
 
   const filteredSellers = useMemo(() => {
-    return allSellers.filter(
+    const filtered = allSellers.filter(
       (seller) =>
         seller.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         seller.serviceName.toLowerCase().includes(searchTerm.toLowerCase())
     );
+    console.log("Filtered sellers:", JSON.stringify(filtered, null, 2));
+    return filtered;
   }, [allSellers, searchTerm]);
 
   useEffect(() => {
@@ -137,7 +175,7 @@ function ServiceDetails() {
 
     try {
       const response = await axios.post(
-        `${import.meta.env.VITE_API_URL}/api/orders`,
+        `${BACKEND_URL}/api/orders`,
         {
           serviceId,
           sellerId,
@@ -175,7 +213,7 @@ function ServiceDetails() {
       setChatSellerId(sellerId);
       try {
         const response = await axios.get(
-          `${import.meta.env.VITE_API_URL}/api/messages/${sellerId}`,
+          `${BACKEND_URL}/api/messages/${sellerId}`,
           { headers: { Authorization: `Bearer ${token}` } }
         );
         setMessages(response.data.messages || []);
@@ -190,7 +228,7 @@ function ServiceDetails() {
     if (!newMessage.trim() || !chatSellerId) return;
     try {
       const response = await axios.post(
-        `${import.meta.env.VITE_API_URL}/api/messages`,
+        `${BACKEND_URL}/api/messages`,
         { receiverId: chatSellerId, content: newMessage.trim() },
         { headers: { Authorization: `Bearer ${token}` } }
       );
@@ -202,11 +240,15 @@ function ServiceDetails() {
   }, [newMessage, chatSellerId, token, messages]);
 
   const renderStars = useCallback((rating) => {
+    const roundedRating = rating != null && rating > 0 ? Math.round(rating) : 0;
     return Array(5)
       .fill(0)
       .map((_, i) => (
-        <span key={i} className={i < rating ? "text-yellow-400" : "text-gray-300"}>
-          {i < rating ? <FaStar /> : <FaRegStar />}
+        <span
+          key={i}
+          className={i < roundedRating ? "text-yellow-400" : "text-gray-300"}
+        >
+          {i < roundedRating ? <FaStar /> : <FaRegStar />}
         </span>
       ));
   }, []);
@@ -249,7 +291,10 @@ function ServiceDetails() {
           <h3 className="text-xl font-semibold mb-4">Popular Services</h3>
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
             {categoryInfo.sampleServices.map((service, index) => (
-              <div key={index} className="flex items-center gap-2 text-sm text-gray-600">
+              <div
+                key={index}
+                className="flex items-center gap-2 text-sm text-gray-600"
+              >
                 <FaCheck className="text-green-500" /> {service}
               </div>
             ))}
@@ -315,8 +360,16 @@ const ProfessionalCard = ({ seller, onChat, renderStars, openBookingModal }) => 
     <div className="border border-gray-200 rounded-xl p-4 hover:shadow-md transition-all">
       <div className="flex gap-3 mb-3">
         <div className="w-12 h-12 rounded-full overflow-hidden bg-gray-100 flex-shrink-0">
-          {seller.image ? (
-            <img src={seller.image} alt={seller.name} className="w-full h-full object-cover" />
+          {seller.profilePhoto && !seller.profilePhoto.includes("placeholder.com") ? (
+            <img
+              src={seller.profilePhoto}
+              alt={seller.name}
+              className="w-full h-full object-cover"
+              onError={(e) => {
+                console.log(`Image failed to load for ${seller.name}: ${seller.profilePhoto}`);
+                e.target.style.display = "none";
+              }}
+            />
           ) : (
             <div className="flex items-center justify-center h-full text-gray-500 font-semibold text-sm">
               {seller.name
@@ -328,15 +381,29 @@ const ProfessionalCard = ({ seller, onChat, renderStars, openBookingModal }) => 
         </div>
         <div className="flex-1">
           <h3 className="text-base font-semibold mb-1">{seller.name}</h3>
-          <p className="text-xs text-gray-500 mb-2">{seller.serviceName}</p>
+          <p className="text-xs text-gray-500 mb-1">
+            {seller.category} | {seller.serviceName}
+          </p>
           <p className="text-sm text-gray-600 mb-2 line-clamp-2">{seller.bio}</p>
           <div className="flex items-center gap-2 mb-2">
-            <div className="flex">{renderStars(seller.rating || 0)}</div>
+            <div className="flex">{renderStars(seller.rating)}</div>
             <span className="text-xs text-gray-500">
-              {seller.rating?.toFixed(1) || "New"}
+              {seller.rating != null && seller.rating > 0
+                ? `${seller.rating.toFixed(1)} (${seller.reviewsCount} reviews)`
+                : "No reviews yet"}
             </span>
           </div>
-          <div className="text-sm font-medium">From KSh {seller.price}</div>
+          <div className="text-sm font-medium">
+            From KSh {seller.price ? seller.price.toLocaleString() : "N/A"}
+          </div>
+          {seller.experience != null && (
+            <div className="text-xs text-gray-500 mt-1">
+              {seller.experience} years of experience
+            </div>
+          )}
+          <div className="text-xs text-gray-500 mt-1">
+            Location: {seller.location}
+          </div>
         </div>
       </div>
       <div className="flex gap-2">

@@ -11,6 +11,7 @@ const cache = {
   profile: { data: null, timestamp: null, ttl: 2 * 60 * 1000 },
 };
 let lastRefreshTime = 0;
+let isRefreshing = false;
 
 const useStore = create((set) => ({
   token: localStorage.getItem("authToken") || null,
@@ -182,18 +183,19 @@ const useStore = create((set) => ({
   },
 
   refreshUser: async () => {
+    if (isRefreshing) {
+      console.log("refreshUser already in progress, skipping");
+      return useStore.getState().user;
+    }
+    isRefreshing = true;
+
     const now = Date.now();
     if (now - lastRefreshTime < 5000) {
       console.log("Skipping refreshUser: called too soon");
+      isRefreshing = false;
       return useStore.getState().user;
     }
     lastRefreshTime = now;
-
-    if (cache.profile.data && now - cache.profile.timestamp < cache.profile.ttl) {
-      console.log("Using cached profile data:", cache.profile.data);
-      set({ user: cache.profile.data });
-      return cache.profile.data;
-    }
 
     set({ isLoading: true });
     try {
@@ -201,20 +203,19 @@ const useStore = create((set) => ({
       const response = await api.get("/api/profile", {
         headers: { Authorization: `Bearer ${useStore.getState().token}` },
       });
-      const updatedUser = response.data?.user || response.data;
-      console.log("Profile fetched:", updatedUser);
+      console.log("Raw /api/profile response:", JSON.stringify(response.data, null, 2));
 
-      if (updatedUser.profilePhoto) {
-        const fullProfilePhotoUrl = `${BACKEND_URL}${updatedUser.profilePhoto}`;
-        console.log("Profile photo URL:", fullProfilePhotoUrl);
-      } else {
-        console.log("No profile photo in response");
-      }
+      const baseUser = response.data?.user || response.data;
+      const seller = baseUser?.sellerProfile || {};
 
-      cache.profile = {
-        data: updatedUser,
-        timestamp: now,
-        ttl: 2 * 60 * 1000,
+      const updatedUser = {
+        ...baseUser,
+        profilePhoto: baseUser.profilePhoto || seller.profilePhoto || null,
+        bio: baseUser.bio || seller.bio || "",
+        location: baseUser.location || seller.location || "",
+        phone: baseUser.phone || seller.phone || "",
+        services: Array.isArray(seller.services) ? seller.services : [],
+        profileComplete: !!seller.isComplete,
       };
 
       set({
@@ -222,6 +223,7 @@ const useStore = create((set) => ({
         isLoading: false,
         isAuthenticated: true,
       });
+      console.log("Updated user state:", JSON.stringify(updatedUser, null, 2));
       return updatedUser;
     } catch (error) {
       console.error("Refresh user error:", {
@@ -234,6 +236,7 @@ const useStore = create((set) => ({
         const refreshed = await useStore.getState().refreshToken();
         if (refreshed) {
           console.log("Token refreshed, retrying refreshUser");
+          isRefreshing = false;
           return await useStore.getState().refreshUser();
         }
         console.log("Token refresh failed, clearing state and redirecting");
@@ -250,19 +253,12 @@ const useStore = create((set) => ({
         set({ isLoading: false });
       }
       throw error;
+    } finally {
+      isRefreshing = false;
     }
   },
 
   fetchServices: async () => {
-    if (
-      cache.services.data &&
-      cache.services.timestamp &&
-      Date.now() - cache.services.timestamp < cache.services.ttl
-    ) {
-      console.log("Using cached services");
-      set({ services: cache.services.data, servicesLoading: false });
-      return;
-    }
     set({ servicesLoading: true });
     try {
       const response = await api.get("/api/services", {
@@ -289,15 +285,6 @@ const useStore = create((set) => ({
   },
 
   fetchUserServices: async () => {
-    if (
-      cache.userServices.data &&
-      cache.userServices.timestamp &&
-      Date.now() - cache.userServices.timestamp < cache.userServices.ttl
-    ) {
-      console.log("Using cached userServices");
-      set({ userServices: cache.userServices.data, userServicesLoading: false });
-      return;
-    }
     set({ userServicesLoading: true });
     try {
       const response = await api.get("/api/services/user", {
@@ -325,11 +312,13 @@ const useStore = create((set) => ({
       });
       console.log("Service deleted successfully:", response.data);
       cache.userServices.data = null;
+      cache.services.data = null;
       set((state) => ({
         userServices: state.userServices.filter(
           (service) => service.id !== serviceId
         ),
       }));
+      await useStore.getState().fetchServices();
       return response.data;
     } catch (error) {
       console.error("Delete service error:", {
@@ -515,12 +504,9 @@ const useStore = create((set) => ({
         },
       });
       console.log("Profile update response:", response.data);
-
       cache.profile = { data: null, timestamp: null, ttl: cache.profile.ttl };
-
       const updatedUser = await useStore.getState().refreshUser();
       console.log("User state after profile update:", updatedUser);
-
       set({ isLoading: false });
       return updatedUser;
     } catch (error) {
@@ -546,6 +532,9 @@ const useStore = create((set) => ({
       });
       console.log("Service added successfully:", response.data);
       cache.userServices.data = null;
+      cache.services.data = null;
+      await useStore.getState().fetchServices();
+      await useStore.getState().fetchUserServices();
       set((state) => ({
         userServices: [
           ...state.userServices,

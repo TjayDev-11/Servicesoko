@@ -11,7 +11,7 @@ import {
   FiMail,
   FiLoader,
 } from "react-icons/fi";
-import { FaUserTie, FaStore, FaTools } from "react-icons/fa";
+import { FaUserTie, FaStore, FaTools, FaStar, FaStarHalfAlt } from "react-icons/fa";
 
 function Profile() {
   const { user, token, refreshUser } = useStore();
@@ -60,16 +60,21 @@ function Profile() {
   useEffect(() => {
     if (form.profilePhoto) {
       if (typeof form.profilePhoto === "string") {
-        // If it's a string path from backend
         setTempPhotoUrl(`${BACKEND_URL}${form.profilePhoto}`);
       } else if (form.profilePhoto instanceof File) {
-        // If it's a newly uploaded file
         const url = URL.createObjectURL(form.profilePhoto);
         setTempPhotoUrl(url);
         return () => URL.revokeObjectURL(url);
       }
+    } else {
+      setTempPhotoUrl(null);
     }
   }, [form.profilePhoto]);
+
+  // Log form state changes
+  useEffect(() => {
+    console.log("Current form state:", JSON.stringify(form, null, 2));
+  }, [form]);
 
   // Authentication check and data loading
   useEffect(() => {
@@ -77,7 +82,6 @@ function Profile() {
       navigate("/login");
     } else {
       refreshUser(token).then(() => {
-        // Force reload profile data after refresh
         const updatedUser = useStore.getState().user;
         if (updatedUser) {
           updateFormData(updatedUser);
@@ -87,22 +91,25 @@ function Profile() {
   }, [token, navigate, refreshUser]);
 
   const updateFormData = (userData) => {
+    const seller = userData?.sellerProfile || {};
     const newForm = {
-      name: userData.name || "",
-      email: userData.email || "",
-      role: (userData.role || "buyer").toLowerCase(),
-      location: userData.location || userData?.sellerProfile?.location || "",
-      phone: userData.phone || userData?.sellerProfile?.phone || "",
-      services: userData?.sellerProfile?.services || "",
-      bio: userData.bio || userData?.sellerProfile?.bio || "",
-      profilePhoto: userData.profilePhoto || userData?.sellerProfile?.profilePhoto || null,
+      name: userData.name || form.name || "",
+      email: userData.email || form.email || "",
+      role: (userData.role || form.role || "buyer").toLowerCase(),
+      location: userData.location || seller.location || form.location || "",
+      phone: userData.phone || seller.phone || form.phone || "",
+      bio: userData.bio || seller.bio || form.bio || "",
+      services: Array.isArray(seller.services)
+        ? seller.services.join(", ")
+        : form.services || "",
+      profilePhoto:
+        userData.profilePhoto || seller.profilePhoto || form.profilePhoto || null,
     };
+    const serviceTitles = Array.isArray(seller.services) ? seller.services : [];
+    console.log("updateFormData - userData:", JSON.stringify(userData, null, 2));
+    console.log("updateFormData - newForm:", JSON.stringify(newForm, null, 2));
+    console.log("updateFormData - serviceTitles:", serviceTitles);
     setForm(newForm);
-
-    // Extract service titles from serviceSellers array
-    const serviceTitles = userData?.sellerProfile?.serviceSellers
-      ?.map((serviceSeller) => serviceSeller?.service?.title)
-      .filter(Boolean) || [];
     setServicesList(serviceTitles);
   };
 
@@ -150,8 +157,12 @@ function Profile() {
         formData.append("profilePhoto", form.profilePhoto);
       }
 
+      console.log(
+        "Submitting profile update with formData:",
+        Object.fromEntries(formData)
+      );
+
       await updateProfile(formData);
-      // Force refresh user data to get the updated profile
       await refreshUser(token);
       setFeedback({ message: "Profile updated successfully!", type: "success" });
       setIsEditing(false);
@@ -159,7 +170,10 @@ function Profile() {
     } catch (error) {
       console.error("Update error:", error);
       setFeedback({
-        message: error.response?.data?.message || error.message || "Update failed. Please try again.",
+        message:
+          error.response?.data?.message ||
+          error.message ||
+          "Update failed. Please try again.",
         type: "error",
       });
       setTimeout(() => setFeedback(null), 3000);
@@ -171,6 +185,23 @@ function Profile() {
 
   const getInitial = (name) => (name ? name[0].toUpperCase() : "");
 
+  // Calculate average rating and star display
+  const getAverageRating = () => {
+    const ratings = user?.sellerProfile?.ratings || [];
+    if (ratings.length === 0) return { average: null, stars: [] };
+    const average = ratings.reduce((sum, rating) => sum + rating, 0) / ratings.length;
+    const roundedAverage = Number(average.toFixed(1));
+    const fullStars = Math.floor(roundedAverage);
+    const hasHalfStar = roundedAverage % 1 >= 0.5;
+    const emptyStars = 5 - fullStars - (hasHalfStar ? 1 : 0);
+    const stars = [
+      ...Array(fullStars).fill("full"),
+      ...(hasHalfStar ? ["half"] : []),
+      ...Array(emptyStars).fill("empty"),
+    ];
+    return { average: roundedAverage, stars };
+  };
+
   if (!user) {
     return (
       <div className="min-h-screen flex items-center justify-center text-gray-600 text-center p-10">
@@ -179,6 +210,8 @@ function Profile() {
       </div>
     );
   }
+
+  const { average: avgRating, stars: ratingStars } = getAverageRating();
 
   return (
     <div className="min-h-screen bg-gray-50 py-12 px-4 sm:px-6 lg:px-8 font-inter">
@@ -211,7 +244,9 @@ function Profile() {
         {feedback && (
           <div
             className={`fixed top-4 right-4 max-w-sm p-3 rounded-md text-sm flex items-center gap-2 animate-fadeInUp z-50 ${
-              feedback.type === "success" ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"
+              feedback.type === "success"
+                ? "bg-green-100 text-green-700"
+                : "bg-red-100 text-red-700"
             }`}
           >
             {feedback.message}
@@ -261,10 +296,12 @@ function Profile() {
                   </label>
                 )}
               </div>
-              
-              <h2 className="text-xl font-semibold text-gray-900 text-center">{form.name}</h2>
+
+              <h2 className="text-xl font-semibold text-gray-900 text-center">
+                {form.name}
+              </h2>
               <p className="text-sm text-gray-600 text-center mb-4">{form.email}</p>
-              
+
               <div className="w-full space-y-3">
                 <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-md">
                   <div className="p-2 bg-cyan-100 text-cyan-600 rounded-full">
@@ -281,7 +318,40 @@ function Profile() {
                     </p>
                   </div>
                 </div>
-                
+
+                {(form.role === "seller" || form.role === "both") && (
+                  <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-md">
+                    <div className="p-2 bg-cyan-100 text-cyan-600 rounded-full">
+                      <FaStar className="text-lg" />
+                    </div>
+                    <div>
+                      <p className="text-xs text-gray-500">Average Rating</p>
+                      <div className="flex items-center gap-1 text-sm font-medium text-gray-900">
+                        {ratingStars.length > 0 ? (
+                          <>
+                            {ratingStars.map((star, idx) => (
+                              <span key={idx}>
+                                {star === "full" && (
+                                  <FaStar className="text-cyan-600" />
+                                )}
+                                {star === "half" && (
+                                  <FaStarHalfAlt className="text-cyan-600" />
+                                )}
+                                {star === "empty" && (
+                                  <FaStar className="text-gray-300" />
+                                )}
+                              </span>
+                            ))}
+                            <span className="ml-2">({avgRating} / 5)</span>
+                          </>
+                        ) : (
+                          "No ratings yet"
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )}
+
                 <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-md">
                   <div className="p-2 bg-cyan-100 text-cyan-600 rounded-full">
                     <FiMapPin className="text-lg" />
@@ -293,7 +363,7 @@ function Profile() {
                     </p>
                   </div>
                 </div>
-                
+
                 <div className="flex items-center gap-3 p-3 bg-gray-50 rounded-md">
                   <div className="p-2 bg-cyan-100 text-cyan-600 rounded-full">
                     <FiPhone className="text-lg" />
@@ -386,7 +456,7 @@ function Profile() {
                         value={form.services}
                         onChange={(e) => setForm({ ...form, services: e.target.value })}
                         className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-cyan-400 focus:border-transparent"
-                        placeholder="Gardening, Plumbing, Cleaning..."
+                        placeholder="Electrical, Wiring..."
                       />
                     </div>
                   </>
