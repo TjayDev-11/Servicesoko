@@ -33,7 +33,7 @@ const storage = multer.diskStorage({
   destination: uploadDir,
   filename: (req, file, cb) => {
     const uniqueSuffix = Date.now() + "-" + Math.round(Math.random() * 1e9);
-    cb(null, uniqueSuffix + path.extname(file.originalname));
+    cb(null, uniqueSuffix + path.extname(file.originalName));
   },
 });
 
@@ -42,7 +42,7 @@ const upload = multer({
   limits: { fileSize: 5 * 1024 * 1024 }, // 5MB limit
   fileFilter: (req, file, cb) => {
     const filetypes = /jpeg|jpg|png/;
-    const extname = filetypes.test(path.extname(file.originalname).toLowerCase());
+    const extname = filetypes.test(path.extname(file.originalName).toLowerCase());
     const mimetype = filetypes.test(file.mimetype);
     if (extname && mimetype) {
       return cb(null, true);
@@ -91,6 +91,12 @@ router.get("/profile", authenticateToken, profileLimiter, async (req, res) => {
             experience: true,
             isComplete: true,
             bio: true,
+            ratings: true,
+            serviceSellers: {
+              include: {
+                service: true,
+              },
+            },
           },
         },
       },
@@ -102,6 +108,26 @@ router.get("/profile", authenticateToken, profileLimiter, async (req, res) => {
         code: "USER_NOT_FOUND",
       });
     }
+
+    console.log(
+      `Raw SellerProfile from database for user ${req.user.id}:`,
+      JSON.stringify(user.sellerProfile, null, 2)
+    );
+
+    console.log(
+      `Profile fetched for user ${req.user.id}:`,
+      JSON.stringify(
+        {
+          user: {
+            ...user,
+            sellerProfile: user.sellerProfile || null,
+            profileComplete: !!user.sellerProfile?.isComplete,
+          },
+        },
+        null,
+        2
+      )
+    );
 
     res.json({
       user: {
@@ -183,7 +209,7 @@ router.put(
         const existingUser = await prisma.user.findFirst({
           where: {
             phone: sanitizedPhone,
-            id: { not: userId }, // exclude current user
+            id: { not: userId },
           },
         });
 
@@ -205,6 +231,8 @@ router.put(
       if (sanitizedLocation) updateData.location = sanitizedLocation;
       if (sanitizedBio) updateData.bio = sanitizedBio;
       if (profilePhoto) updateData.profilePhoto = profilePhoto;
+
+      console.log("User update data:", updateData);
 
       const updatedUser = await prisma.user.update({
         where: { id: userId },
@@ -228,6 +256,7 @@ router.put(
               experience: true,
               isComplete: true,
               bio: true,
+              ratings: true,
             },
           },
         },
@@ -235,6 +264,22 @@ router.put(
 
       // Seller-specific profile update
       if (role === "SELLER" || role === "BOTH") {
+        // Ensure SellerProfile exists
+        const existingProfile = await prisma.sellerProfile.findUnique({
+          where: { userId },
+        });
+        if (!existingProfile) {
+          console.log(`Creating new SellerProfile for user ${userId}`);
+          await prisma.sellerProfile.create({
+            data: {
+              userId,
+              name: name.trim(),
+              location: sanitizedLocation || "",
+              isComplete: false,
+            },
+          });
+        }
+
         const sellerUpdateData = {};
 
         if (sanitizedLocation) sellerUpdateData.location = sanitizedLocation;
@@ -247,15 +292,29 @@ router.put(
                   .split(",")
                   .map((s) => s.trim())
                   .filter(Boolean)
-              : services;
+              : Array.isArray(services)
+              ? services
+              : [];
         }
-        if (profilePhoto) {
-          sellerUpdateData.profilePhoto = profilePhoto;
-        }
+        if (profilePhoto) sellerUpdateData.profilePhoto = profilePhoto;
+        sellerUpdateData.isComplete = true;
+
+        console.log("Seller update data:", sellerUpdateData);
 
         const updatedSellerProfile = await prisma.sellerProfile.update({
           where: { userId },
           data: sellerUpdateData,
+          select: {
+            location: true,
+            gender: true,
+            phone: true,
+            profilePhoto: true,
+            services: true,
+            experience: true,
+            isComplete: true,
+            bio: true,
+            ratings: true,
+          },
         });
 
         return res.json({
@@ -317,6 +376,17 @@ router.post(
               .filter(Boolean)
           : [];
 
+      console.log("Creating seller profile with data:", {
+        userId: req.user.id,
+        name: cleanName,
+        phone: cleanPhone,
+        location: cleanLocation,
+        gender: cleanGender,
+        profilePhoto: req.file ? `/Uploads/profiles/${req.file.filename}` : null,
+        services: cleanServices,
+        bio: cleanBio,
+      });
+
       const result = await prisma.$transaction(async (tx) => {
         const existingProfile = await tx.sellerProfile.findUnique({
           where: { userId: req.user.id },
@@ -361,6 +431,11 @@ router.post(
         });
         return { sellerProfile, photoUrl, updatedUser };
       });
+
+      console.log(
+        `Seller profile created for user ${req.user.id}:`,
+        JSON.stringify(result.sellerProfile, null, 2)
+      );
 
       // Send seller approval email notification
       if (result.updatedUser.email) {

@@ -14,6 +14,12 @@ const upload = multer();
 const { window } = new JSDOM("");
 const DOMPurify = createDOMPurify(window);
 
+// Normalize title to ensure consistency
+const normalizeTitle = (title) => {
+  if (!title) return "";
+  return title.trim().replace(/\s+/g, " ").toLowerCase();
+};
+
 // Rate limiting for service creation
 const serviceLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
@@ -78,6 +84,8 @@ router.post(
       const result = await prisma.$transaction(async (tx) => {
         const normalizedCategory =
           category.charAt(0).toUpperCase() + category.slice(1).toLowerCase();
+        const sanitizedTitle = DOMPurify.sanitize(title.trim());
+        const normalizedTitleValue = normalizeTitle(sanitizedTitle);
 
         const categoryRecord = await tx.category.upsert({
           where: { name: normalizedCategory },
@@ -87,7 +95,7 @@ router.post(
 
         let service = await tx.service.findFirst({
           where: {
-            title: DOMPurify.sanitize(title.trim()),
+            title: sanitizedTitle,
             categoryId: categoryRecord.id,
           },
         });
@@ -95,7 +103,7 @@ router.post(
         if (!service) {
           service = await tx.service.create({
             data: {
-              title: DOMPurify.sanitize(title.trim()),
+              title: sanitizedTitle,
               categoryId: categoryRecord.id,
             },
           });
@@ -121,11 +129,12 @@ router.post(
           },
         });
 
+        // Update sellerProfile.services with normalized title
         await tx.sellerProfile.update({
           where: { userId: req.user.id },
           data: {
             services: {
-              push: service.title,
+              push: normalizedTitleValue,
             },
           },
         });
@@ -239,8 +248,16 @@ router.get("/services", async (req, res) => {
           include: {
             seller: {
               include: {
-                sellerProfile: true,
-                reviews: true, // Fetch reviews associated with the seller (User model)
+                sellerProfile: {
+                  select: {
+                    ratings: true,
+                    profilePhoto: true,
+                    location: true,
+                    phone: true,
+                    bio: true,
+                    services: true,
+                  },
+                },
               },
             },
           },
@@ -252,24 +269,27 @@ router.get("/services", async (req, res) => {
     const servicesWithSellerRatings = services.map((service) => {
       const sellers = service.serviceSellers.map((serviceSeller) => {
         const seller = serviceSeller.seller;
-        // Use seller.reviews (from User model, linked via sellerId in Review)
-        const sellerReviews = seller.reviews || [];
+        const sellerProfile = seller.sellerProfile;
+        const ratings = sellerProfile?.ratings || [];
         const avgRating =
-          sellerReviews.length > 0
-            ? sellerReviews.reduce((sum, r) => sum + r.rating, 0) /
-              sellerReviews.length
+          ratings.length > 0
+            ? ratings.reduce((sum, r) => sum + r, 0) / ratings.length
             : 0;
 
         return {
           id: seller.id,
           name: seller.name,
+          profilePhoto: sellerProfile?.profilePhoto || seller.profilePhoto || null,
+          image: sellerProfile?.profilePhoto || seller.profilePhoto || null,
+          bio: sellerProfile?.bio || seller.bio || null,
           rating: avgRating,
-          reviewsCount: sellerReviews.length,
-          location: seller.sellerProfile?.location || "Not specified",
-          phone: seller.sellerProfile?.phone || "Not provided",
+          reviewsCount: ratings.length,
+          location: sellerProfile?.location || "Not specified",
+          phone: sellerProfile?.phone || "Not provided",
           description: serviceSeller.description || "No description provided",
           price: serviceSeller.price || 0,
           experience: serviceSeller.experience || null,
+          ratings: ratings,
         };
       });
 
@@ -326,6 +346,10 @@ router.get("/services/user", authenticateToken, async (req, res) => {
 
     const userServices = services.map((service) => {
       const serviceSeller = service.serviceSellers[0]; // Only the user's serviceSeller
+      if (!serviceSeller) {
+        console.warn(`No serviceSeller found for service ${service.id}, user ${req.user.id}`);
+        return null;
+      }
       return {
         id: service.id,
         title: service.title,
@@ -334,18 +358,21 @@ router.get("/services/user", authenticateToken, async (req, res) => {
         price: serviceSeller.price || 0,
         experience: serviceSeller.experience || null,
       };
-    });
+    }).filter(service => service !== null);
 
     res.json({
       message: "Your services",
       services: userServices,
     });
   } catch (error) {
-    console.error("Error fetching user services:", error);
+    console.error("Error fetching user services:", {
+      message: error.message,
+      stack: error.stack,
+      userId: req.user?.id,
+    });
     res.status(500).json({
       error: "Failed to fetch your services",
-      details:
-        process.env.NODE_ENV === "development" ? error.message : undefined,
+      details: process.env.NODE_ENV === "development" ? error.message : undefined,
     });
   }
 });
@@ -361,8 +388,16 @@ router.get("/services/:id/sellers", async (req, res) => {
           include: {
             seller: {
               include: {
-                sellerProfile: true,
-                reviews: true, // Fetch reviews associated with the seller
+                sellerProfile: {
+                  select: {
+                    ratings: true,
+                    profilePhoto: true,
+                    location: true,
+                    phone: true,
+                    bio: true,
+                    services: true,
+                  },
+                },
               },
             },
           },
@@ -374,22 +409,27 @@ router.get("/services/:id/sellers", async (req, res) => {
 
     const sellers = service.serviceSellers.map((serviceSeller) => {
       const seller = serviceSeller.seller;
+      const sellerProfile = seller.sellerProfile;
+      const ratings = sellerProfile?.ratings || [];
       const avgRating =
-        seller.reviews.length > 0
-          ? seller.reviews.reduce((sum, r) => sum + r.rating, 0) /
-            seller.reviews.length
+        ratings.length > 0
+          ? ratings.reduce((sum, r) => sum + r, 0) / ratings.length
           : 0;
 
       return {
         id: seller.id,
         name: seller.name,
-        phone: seller.sellerProfile?.phone || "Not provided",
-        services: seller.sellerProfile?.services,
-        location: seller.sellerProfile?.location,
+        profilePhoto: sellerProfile?.profilePhoto || seller.profilePhoto || null,
+        image: sellerProfile?.profilePhoto || seller.profilePhoto || null,
+        bio: sellerProfile?.bio || seller.bio || null,
+        phone: sellerProfile?.phone || "Not provided",
+        services: sellerProfile?.services,
+        location: sellerProfile?.location,
         description: serviceSeller.description || "No description provided",
         price: serviceSeller.price || 0,
         rating: avgRating,
         experience: serviceSeller.experience || null,
+        ratings: ratings,
       };
     });
 
@@ -426,42 +466,67 @@ router.delete("/services/:id", authenticateToken, async (req, res) => {
       });
     }
 
-    // Delete the serviceSeller record
-    await prisma.serviceSeller.delete({
-      where: {
-        id: serviceSeller.id,
-      },
-    });
+    // Normalize the service title for comparison
+    const normalizedServiceTitle = normalizeTitle(serviceSeller.service.title);
+    console.log(`Deleting service with ID: ${id}, Normalized title: ${normalizedServiceTitle}`);
 
-    // Delete the service if no other sellers are associated
-    const remainingSellers = await prisma.serviceSeller.count({
-      where: { serviceId: id },
-    });
-
-    if (remainingSellers === 0) {
-      await prisma.service.delete({
-        where: { id },
+    // Transaction to ensure atomicity
+    await prisma.$transaction(async (tx) => {
+      // Delete the serviceSeller record
+      await tx.serviceSeller.delete({
+        where: {
+          id: serviceSeller.id,
+        },
       });
-    }
 
-    // Update seller profile to remove the service from services array
-    const sellerProfile = await prisma.sellerProfile.findUnique({
-      where: { userId: req.user.id },
-    });
+      // Delete the service if no other sellers are associated
+      const remainingSellers = await tx.serviceSeller.count({
+        where: { serviceId: id },
+      });
 
-    if (sellerProfile && sellerProfile.services) {
-      const updatedServices = sellerProfile.services.filter(
-        (serviceTitle) => serviceTitle !== serviceSeller.service.title
-      );
-      await prisma.sellerProfile.update({
+      if (remainingSellers === 0) {
+        await tx.service.delete({
+          where: { id },
+        });
+        console.log(`Service with ID ${id} deleted as no other sellers are associated`);
+      }
+
+      // Update seller profile to remove the service from services array
+      const sellerProfile = await tx.sellerProfile.findUnique({
         where: { userId: req.user.id },
-        data: { services: updatedServices },
       });
-    }
+
+      if (!sellerProfile) {
+        console.warn(`No seller profile found for user ${req.user.id}`);
+        return;
+      }
+
+      if (sellerProfile.services && sellerProfile.services.length > 0) {
+        const updatedServices = sellerProfile.services.filter(
+          (serviceTitle) => normalizeTitle(serviceTitle) !== normalizedServiceTitle
+        );
+        console.log(`Original services: ${sellerProfile.services}, Updated services: ${updatedServices}`);
+
+        if (updatedServices.length !== sellerProfile.services.length) {
+          await tx.sellerProfile.update({
+            where: { userId: req.user.id },
+            data: { services: updatedServices },
+          });
+          console.log(`SellerProfile.services updated for user ${req.user.id}`);
+        } else {
+          console.log(`No changes to SellerProfile.services for user ${req.user.id}`);
+        }
+      } else {
+        console.log(`SellerProfile.services is empty or null for user ${req.user.id}`);
+      }
+    });
 
     res.json({ message: "Service deleted successfully" });
   } catch (error) {
-    console.error("Service deletion error:", error);
+    console.error("Service deletion error:", {
+      message: error.message,
+      stack: error.stack,
+    });
     res.status(500).json({
       error: "Failed to delete service",
       details:
