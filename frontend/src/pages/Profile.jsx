@@ -33,7 +33,7 @@ function Profile() {
   const navigate = useNavigate();
   const sectionRef = useRef(null);
 
-  const BACKEND_URL = "http://localhost:5000";
+  const BACKEND_URL = "https://servicesoko.onrender.com";
 
   // Animation observer
   useEffect(() => {

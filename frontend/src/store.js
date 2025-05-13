@@ -3,7 +3,7 @@ import { jwtDecode } from "jwt-decode";
 import axios from "axios";
 
 const api = axios.create({ baseURL: import.meta.env.VITE_API_URL });
-const BACKEND_URL = "http://localhost:5000";
+const BACKEND_URL = "https://servicesoko.onrender.com";
 
 const cache = {
   services: { data: null, timestamp: null, ttl: 5 * 60 * 1000 },
