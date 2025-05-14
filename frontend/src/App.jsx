@@ -21,10 +21,12 @@ import Orders from "./pages/Orders";
 import ForgotPassword from "./pages/ForgotPassword";
 import ResetPassword from "./pages/ResetPassword";
 import GoogleCallback from "./pages/GoogleCallback";
+import Settings from "./pages/Settings"; // New import
 import Navbar from "./components/Navbar";
 import About from "./pages/About";
 import Footer from "./components/Footer";
 import { Component } from "react";
+import ScrollToTop from "./ScrollToTop";
 
 class ErrorBoundary extends Component {
   state = { hasError: false };
@@ -123,11 +125,12 @@ function App() {
 
   return (
     <Router>
+      <ScrollToTop />
       <div
-        style={{ minHeight: "100vh", width:"100%", display: "flex", flexDirection: "column" }}
+        style={{ minHeight: "100vh", width: "100%", display: "flex", flexDirection: "column" }}
       >
         <Navbar />
-        <div style={{ flex: 1,  minWidth:"100%"}}>
+        <div style={{ flex: 1, minWidth: "100%" }}>
           <Routes>
             <Route path="/" element={<Home />} />
             <Route
@@ -150,8 +153,7 @@ function App() {
                 )
               }
             />
-            
-<Route path="/become-seller" element={<BecomeSeller />} />
+            <Route path="/become-seller" element={<BecomeSeller />} />
             <Route
               path="/dashboard"
               element={
@@ -200,6 +202,18 @@ function App() {
               path="/orders"
               element={
                 isAuthenticated ? <Orders /> : <Navigate to="/login" replace />
+              }
+            />
+            <Route
+              path="/settings"
+              element={
+                isAuthenticated ? (
+                  <ErrorBoundary>
+                    <Settings />
+                  </ErrorBoundary>
+                ) : (
+                  <Navigate to="/login" replace />
+                )
               }
             />
             <Route path="/forgot-password" element={<ForgotPassword />} />

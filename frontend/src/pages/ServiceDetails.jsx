@@ -22,7 +22,7 @@ function ServiceDetails() {
   const [bookingDate, setBookingDate] = useState("");
   const [bookingStatus, setBookingStatus] = useState(null);
   const navigate = useNavigate();
-  const BACKEND_URL = "https://servicesoko.onrender.com";
+  const BACKEND_URL = import.meta.env.VITE_BACKEND_URL;
 
   useEffect(() => {
     if (!category) {

@@ -1,42 +1,74 @@
-
 import { Link } from "react-router-dom";
 import { useEffect, useState, useRef } from "react";
 
 function Home() {
-  const heroBackgrounds = [
-    "/images/gardening.png",
-    "/images/plumbing.png",
-    "/images/movers.png",
-    "/images/electrical.png",
-  ];
+  const heroBackgrounds = {
+    desktop: [
+      "/images/gardening.webp",
+      "/images/plumbing.webp",
+      "/images/movers.webp",
+      "/images/electrical.webp",
+    ],
+    mobile: [
+      "/images/gardening-mobile.webp",
+      "/images/plumbing-mobile.webp",
+      "/images/movers-mobile.webp",
+      "/images/electrical-mobile.webp",
+    ],
+  };
 
   const [currentBgIndex, setCurrentBgIndex] = useState(0);
   const [nextBgIndex, setNextBgIndex] = useState(1);
   const [isFading, setIsFading] = useState(false);
+  const [imagesLoaded, setImagesLoaded] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
   const sectionRefs = useRef([]);
 
-  // Preload images and rotate backgrounds
+  // Check for mobile viewport and preload images
   useEffect(() => {
-    heroBackgrounds.forEach((img) => {
+    const handleResize = () => {
+      setIsMobile(window.innerWidth < 768);
+    };
+
+    handleResize();
+    window.addEventListener("resize", handleResize);
+
+    const backgrounds = isMobile ? heroBackgrounds.mobile : heroBackgrounds.desktop;
+    let loadedCount = 0;
+
+    backgrounds.forEach((img) => {
       const image = new Image();
       image.src = img;
+      image.onload = () => {
+        loadedCount++;
+        if (loadedCount === backgrounds.length) {
+          setImagesLoaded(true);
+        }
+      };
+      image.onerror = () => {
+        console.error(`Failed to load image: ${img}`);
+        loadedCount++;
+      };
     });
 
     const interval = setInterval(() => {
       setIsFading(true);
       setTimeout(() => {
         setCurrentBgIndex((prevIndex) =>
-          prevIndex === heroBackgrounds.length - 1 ? 0 : prevIndex + 1
+          prevIndex === backgrounds.length - 1 ? 0 : prevIndex + 1
         );
         setNextBgIndex((prevIndex) =>
-          prevIndex === heroBackgrounds.length - 1 ? 0 : prevIndex + 1
+          prevIndex === backgrounds.length - 1 ? 0 : prevIndex + 1
         );
         setIsFading(false);
-      }, 1000); // Match transition duration
+      }, 1000);
     }, 5000);
 
-    return () => clearInterval(interval);
-  }, [heroBackgrounds]);
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener("resize", handleResize);
+    };
+  }, [isMobile]);
 
   // Animate sections on scroll
   useEffect(() => {
@@ -70,37 +102,36 @@ function Home() {
     };
   }, []);
 
+  const backgrounds = isMobile ? heroBackgrounds.mobile : heroBackgrounds.desktop;
+
   return (
     <div className="bg-black text-white mt-5">
       {/* Hero Section */}
-      <section
-        className="relative w-screen min-h-screen flex items-center justify-center text-white overflow-hidden"
-      >
+      <section className="relative w-screen min-h-[80vh] sm:min-h-screen flex items-center justify-center text-white overflow-hidden">
+        {!imagesLoaded && (
+          <div className="absolute inset-0 bg-gray-800 animate-pulse z-0"></div>
+        )}
+
         <div
-          className="absolute inset-0 bg-cover bg-center bg-no-repeat transition-transform duration-[5000ms] ease-linear min-h-screen sm:min-h-[unset]"
+          className="absolute inset-0 bg-cover bg-center bg-no-repeat transition-all duration-1000 ease-[cubic-bezier(0.4,0,0.2,1)] z-0"
           style={{
-            backgroundImage: `linear-gradient(rgba(0, 0, 0, 0.7), rgba(0, 0, 0, 0.7)), url(${heroBackgrounds[currentBgIndex]})`,
-            transform: isFading ? "scale(1.05)" : "scale(1)",
+            backgroundImage: `linear-gradient(rgba(0, 0, 0, 0.7), rgba(0, 0, 0, 0.7)), url(${backgrounds[currentBgIndex]})`,
             opacity: isFading ? 0 : 1,
-            transitionProperty: "opacity",
-            transitionDuration: "1000ms",
-            transitionTimingFunction: "ease-in-out",
+            transform: isMobile ? "none" : isFading ? "scale(1.05)" : "scale(1)",
           }}
         />
         <div
-          className="absolute inset-0 bg-cover bg-center bg-no-repeat transition-transform duration-[5000ms] ease-linear"
+          className="absolute inset-0 bg-cover bg-center bg-no-repeat transition-all duration-1000 ease-[cubic-bezier(0.4,0,0.2,1)] z-0"
           style={{
-            backgroundImage: `linear-gradient(rgba(0, 0, 0, 0.7), rgba(0, 0, 0, 0.7)), url(${heroBackgrounds[nextBgIndex]})`,
-            transform: isFading ? "scale(1)" : "scale(1.05)",
+            backgroundImage: `linear-gradient(rgba(0, 0, 0, 0.7), rgba(0, 0, 0, 0.7)), url(${backgrounds[nextBgIndex]})`,
             opacity: isFading ? 1 : 0,
-            transitionProperty: "opacity",
-            transitionDuration: "1000ms",
-            transitionTimingFunction: "ease-in-out",
+            transform: isMobile ? "none" : isFading ? "scale(1)" : "scale(1.05)",
           }}
         />
+
         {/* Background image indicators */}
         <div className="absolute bottom-8 left-1/2 transform -translate-x-1/2 flex gap-2 z-10">
-          {heroBackgrounds.map((_, index) => (
+          {backgrounds.map((_, index) => (
             <button
               key={index}
               className={`w-3 h-3 rounded-full transition-all duration-300 ${
@@ -113,7 +144,7 @@ function Home() {
                 setTimeout(() => {
                   setCurrentBgIndex(index);
                   setNextBgIndex(
-                    index === heroBackgrounds.length - 1 ? 0 : index + 1
+                    index === backgrounds.length - 1 ? 0 : index + 1
                   );
                   setIsFading(false);
                 }, 1000);
@@ -136,13 +167,13 @@ function Home() {
           <div className="flex gap-4 justify-center flex-wrap">
             <Link
               to="/services"
-              className="px-8 py-3 bg-cyan-400 text-black font-bold rounded-full transition-all hover:bg-cyan-500 hover:shadow-lg hover:-translate-y-1 transform"
+              className="px-6 py-3 sm:px-8 sm:py-3 bg-cyan-400 text-black font-bold rounded-full transition-all hover:bg-cyan-500 hover:shadow-lg hover:-translate-y-1 transform text-sm sm:text-base"
             >
               Explore Services
             </Link>
             <Link
               to="/login"
-              className="px-8 py-3 bg-transparent text-white font-bold rounded-full border-2 border-white border-opacity-30 transition-all hover:bg-white hover:bg-opacity-15 hover:border-opacity-70 hover:-translate-y-1 transform"
+              className="px-6 py-3 sm:px-8 sm:py-3 bg-transparent text-white font-bold rounded-full border-2 border-white border-opacity-30 transition-all hover:bg-white hover:bg-opacity-15 hover:border-opacity-70 hover:-translate-y-1 transform text-sm sm:text-base"
             >
               Get Started
             </Link>
@@ -174,19 +205,19 @@ function Home() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-10">
             {[
               {
-                image: "/images/search.png",
+                image: "/images/search.webp",
                 title: "Search for Your Service",
                 description: "Browse a wide range of services, from plumbing to cleaning, and find exactly what you need.",
                 step: "1",
               },
               {
-                image: "/images/choose.png",
+                image: "/images/choose.webp",
                 title: "Choose Your Professional",
                 description: "Review profiles, ratings, and prices to select the perfect professional for your task.",
                 step: "2",
               },
               {
-                image: "/images/book.png",
+                image: "/images/book.webp",
                 title: "Book with Confidence",
                 description: "Securely book your service and relax knowing your task is in trusted hands.",
                 step: "3",
@@ -257,6 +288,7 @@ function Home() {
                   src={feature.icon}
                   alt={feature.title}
                   className="w-10 h-10"
+                  loading="lazy"
                 />
               </div>
               <h3 className="text-xl font-bold mb-3">{feature.title}</h3>
@@ -291,35 +323,39 @@ function Home() {
                 name: "Plumbing Services",
                 description: "Fix leaks, install fixtures, and more",
                 price: "From KES 1,500",
-                image: "/images/plumbing.png",
+                image: "/images/plumbing.webp",
               },
               {
                 name: "Electrical Work",
                 description: "Wiring, installations, and repairs",
                 price: "From KES 2,000",
-                image: "/images/electrical.png",
+                image: "/images/electrical.webp",
               },
               {
                 name: "Cleaning Services",
                 description: "Home and office cleaning",
                 price: "From KES 1,000",
-                image: "/images/cleaning.png",
+                image: "/images/cleaning.webp",
               },
               {
                 name: "Movers & Packers",
                 description: "Reliable moving services",
                 price: "From KES 5,000",
-                image: "/images/movers.png",
+                image: "/images/movers.webp",
               },
             ].map((service, index) => (
               <div
                 key={index}
                 className="bg-white rounded-xl overflow-hidden shadow-md hover:shadow-lg transition-all duration-300 hover:-translate-y-2"
               >
-                <div
-                  className="h-48 bg-gray-100 bg-cover bg-center transition-transform duration-500 hover:scale-105"
-                  style={{ backgroundImage: `url(${service.image})` }}
-                ></div>
+                <div className="h-48 bg-gray-100 overflow-hidden">
+                  <img
+                    src={service.image}
+                    alt={service.name}
+                    className="w-full h-full object-cover transition-transform duration-500 hover:scale-105"
+                    loading="lazy"
+                  />
+                </div>
                 <div className="p-6">
                   <h3 className="text-xl font-bold mb-2">{service.name}</h3>
                   <p className="text-gray-600 mb-4 min-h-[3.5rem]">
@@ -365,7 +401,7 @@ function Home() {
                   "Found a great plumber who fixed my leak in under an hour!",
                 author: "James M., Nairobi",
                 rating: "★★★★★",
-                image: "https://randomuser.me/api/portraits/men/32.jpg",
+                image: "/images/testimonial-3.jpg",
                 role: "Homeowner",
               },
               {
@@ -373,7 +409,7 @@ function Home() {
                   "The electrician was professional and reasonably priced.",
                 author: "Sarah W., Mombasa",
                 rating: "★★★★☆",
-                image: "https://randomuser.me/api/portraits/women/44.jpg",
+                image: "/images/testimonial-2.jpg",
                 role: "Business Owner",
               },
               {
@@ -381,7 +417,7 @@ function Home() {
                   "Best platform to find trusted service providers in Kenya.",
                 author: "David K., Kisumu",
                 rating: "★★★★★",
-                image: "https://randomuser.me/api/portraits/men/75.jpg",
+                image: "/images/testimonial-1.jpg",
                 role: "Service Provider",
               },
             ].map((testimonial, index) => (
@@ -389,10 +425,14 @@ function Home() {
                 key={index}
                 className="bg-gray-800 rounded-xl p-8 relative hover:bg-gray-700 hover:shadow-lg transition-all duration-300"
               >
-                <div
-                  className="absolute -top-6 left-6 w-14 h-14 rounded-full bg-cover border-4 border-white shadow-md"
-                  style={{ backgroundImage: `url(${testimonial.image})` }}
-                />
+                <div className="absolute -top-6 left-6 w-14 h-14 rounded-full bg-cover border-4 border-white shadow-md overflow-hidden">
+                  <img
+                    src={testimonial.image}
+                    alt={testimonial.author}
+                    className="w-full h-full object-cover"
+                    loading="lazy"
+                  />
+                </div>
                 <div className="text-2xl text-cyan-400 mb-4">
                   {testimonial.rating}
                 </div>
@@ -424,13 +464,13 @@ function Home() {
           <div className="flex gap-4 justify-center flex-wrap">
             <Link
               to="/signup"
-              className="px-8 py-4 bg-white text-black font-bold rounded-full transition-all hover:bg-gray-100 hover:shadow-lg hover:-translate-y-1 transform"
+              className="px-6 py-3 sm:px-8 sm:py-4 bg-white text-black font-bold rounded-full transition-all hover:bg-gray-100 hover:shadow-lg hover:-translate-y-1 transform text-sm sm:text-base"
             >
               Sign Up Now
             </Link>
             <Link
               to="/services"
-              className="px-8 py-4 bg-transparent text-white font-bold rounded-full border-2 border-white border-opacity-30 transition-all hover:bg-white hover:bg-opacity-15 hover:border-opacity-70 hover:-translate-y-1 transform"
+              className="px-6 py-3 sm:px-8 sm:py-4 bg-transparent text-white font-bold rounded-full border-2 border-white border-opacity-30 transition-all hover:bg-white hover:bg-opacity-15 hover:border-opacity-70 hover:-translate-y-1 transform text-sm sm:text-base"
             >
               Browse Services
             </Link>

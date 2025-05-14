@@ -51,4 +51,19 @@ body {
   .animation-delay-600 {
     animation-delay: 600ms;
   }
+
+  /* Ensure background images fit mobile screens */
+  .bg-mobile-fit {
+    background-size: cover;
+    background-position: center;
+  }
+
+  /* Fine-tune for smaller screens */
+  @media (max-width: 640px) {
+    .bg-mobile-fit {
+      background-size: cover;
+      background-position: center center;
+      min-height: 80vh;
+    }
+  }
 }

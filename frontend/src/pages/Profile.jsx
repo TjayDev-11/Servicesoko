@@ -13,6 +13,7 @@ import {
 } from "react-icons/fi";
 import { FaUserTie, FaStore, FaTools, FaStar, FaStarHalfAlt } from "react-icons/fa";
 
+
 function Profile() {
   const { user, token, refreshUser } = useStore();
   const [form, setForm] = useState({
@@ -33,7 +34,7 @@ function Profile() {
   const navigate = useNavigate();
   const sectionRef = useRef(null);
 
-  const BACKEND_URL = "https://servicesoko.onrender.com";
+  const BACKEND_URL = import.meta.env.VITE_BACKEND_URL;
 
   // Animation observer
   useEffect(() => {

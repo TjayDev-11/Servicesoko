@@ -12,6 +12,7 @@ import {
   FaBars,
   FaTimes,
   FaChevronDown,
+  FaCog, // Added for Settings icon
 } from "react-icons/fa";
 
 const debounce = (func, wait) => {
@@ -91,20 +92,20 @@ function Navbar() {
       dataCache.current.ordersFetched = false;
     }
   }, [isAuthenticated, token, fetchUnreadCount, fetchOrders]);
+
   const [scrolled, setScrolled] = useState(false);
 
-useEffect(() => {
-  const handleScroll = () => {
-    if (window.scrollY > 50) {
-      setScrolled(true);
-    } else {
-      setScrolled(false);
-    }
-  };
-  window.addEventListener("scroll", handleScroll);
-  return () => window.removeEventListener("scroll", handleScroll);
-}, []);
-
+  useEffect(() => {
+    const handleScroll = () => {
+      if (window.scrollY > 50) {
+        setScrolled(true);
+      } else {
+        setScrolled(false);
+      }
+    };
+    window.addEventListener("scroll", handleScroll);
+    return () => window.removeEventListener("scroll", handleScroll);
+  }, []);
 
   useEffect(() => {
     const handleClickOutside = (event) => {
@@ -140,7 +141,7 @@ useEffect(() => {
 
   return (
     <>
-      <nav className="fixed top-0 left-0 right-0 z-50 py-3 px-4 sm:px-6 lg:px-8 font-manrope bg-white/40 backdrop-blur-md shadow-sm">
+      <nav className="fixed top-0 left-0 right-0 z-50 py-3 px-4 sm:px-6 lg:px-8 font-manrope bg-white/80 backdrop-blur-md shadow-sm">
         <div className="max-w-7xl mx-auto flex justify-between items-center">
           <Link to="/" className="flex items-center gap-2">
             <img
@@ -319,6 +320,17 @@ useEffect(() => {
                       </Link>
                     </li>
                     <li>
+                      <Link
+                        to="/settings"
+                        className="flex items-center px-4 py-2 text-gray-900 hover:bg-gray-100 hover:text-cyan-400 transition-colors text-sm font-medium"
+                        onClick={() => setIsDropdownOpen(false)}
+                        aria-label="View settings"
+                      >
+                        <FaCog className="text-cyan-400 mr-2" size={14} />
+                        Settings
+                      </Link>
+                    </li>
+                    <li>
                       <button
                         onClick={handleLogout}
                         className="flex items-center w-full px-4 py-2 text-gray-900 hover:bg-gray-100 hover:text-cyan-400 transition-colors text-sm font-medium"
@@ -399,6 +411,83 @@ useEffect(() => {
                 Contact
               </Link>
             </li>
+            {isAuthenticated && (
+              <>
+                <li>
+                  <Link
+                    to="/profile"
+                    className={`block px-3 py-2 text-gray-900 text-sm font-medium hover:bg-gray-100 hover:text-cyan-400 rounded-md transition-colors font-custom ${
+                      location.pathname === "/profile" ? "text-cyan-400" : ""
+                    }`}
+                    onClick={() => setIsMobileMenuOpen(false)}
+                    aria-current={
+                      location.pathname === "/profile" ? "page" : undefined
+                    }
+                  >
+                    Profile
+                  </Link>
+                </li>
+                <li>
+                  <Link
+                    to="/dashboard"
+                    className={`block px-3 py-2 text-gray-900 text-sm font-medium hover:bg-gray-100 hover:text-cyan-400 rounded-md transition-colors font-custom ${
+                      location.pathname === "/dashboard" ? "text-cyan-400" : ""
+                    }`}
+                    onClick={() => setIsMobileMenuOpen(false)}
+                    aria-current={
+                      location.pathname === "/dashboard" ? "page" : undefined
+                    }
+                  >
+                    Dashboard
+                  </Link>
+                </li>
+                <li>
+                  <Link
+                    to="/messages"
+                    className={`block px-3 py-2 text-gray-900 text-sm font-medium hover:bg-gray-100 hover:text-cyan-400 rounded-md transition-colors font-custom ${
+                      location.pathname === "/messages" ? "text-cyan-400" : ""
+                    }`}
+                    onClick={() => {
+                      setIsMobileMenuOpen(false);
+                      fetchUnreadCount(true);
+                    }}
+                    aria-current={
+                      location.pathname === "/messages" ? "page" : undefined
+                    }
+                  >
+                    Messages {unreadCount > 0 && `(${unreadCount})`}
+                  </Link>
+                </li>
+                <li>
+                  <Link
+                    to="/orders"
+                    className={`block px-3 py-2 text-gray-900 text-sm font-medium hover:bg-gray-100 hover:text-cyan-400 rounded-md transition-colors font-custom ${
+                      location.pathname === "/orders" ? "text-cyan-400" : ""
+                    }`}
+                    onClick={() => setIsMobileMenuOpen(false)}
+                    aria-current={
+                      location.pathname === "/orders" ? "page" : undefined
+                    }
+                  >
+                    Orders {newOrdersCount > 0 && `(${newOrdersCount} New)`}
+                  </Link>
+                </li>
+                <li>
+                  <Link
+                    to="/settings"
+                    className={`block px-3 py-2 text-gray-900 text-sm font-medium hover:bg-gray-100 hover:text-cyan-400 rounded-md transition-colors font-custom ${
+                      location.pathname === "/settings" ? "text-cyan-400" : ""
+                    }`}
+                    onClick={() => setIsMobileMenuOpen(false)}
+                    aria-current={
+                      location.pathname === "/settings" ? "page" : undefined
+                    }
+                  >
+                    Settings
+                  </Link>
+                </li>
+              </>
+            )}
             {!isAuthenticated && (
               <li>
                 <Link
@@ -409,6 +498,17 @@ useEffect(() => {
                 >
                   Log in
                 </Link>
+              </li>
+            )}
+            {isAuthenticated && (
+              <li>
+                <button
+                  onClick={handleLogout}
+                  className="block mt-2 px-3 py-1.5 w-full text-left text-gray-900 text-sm font-medium hover:bg-gray-100 hover:text-cyan-400 rounded-md transition-colors"
+                  aria-label="Log out"
+                >
+                  Logout
+                </button>
               </li>
             )}
           </ul>
