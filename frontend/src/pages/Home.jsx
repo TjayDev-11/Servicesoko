@@ -401,7 +401,7 @@ function Home() {
                   "Found a great plumber who fixed my leak in under an hour!",
                 author: "James M., Nairobi",
                 rating: "★★★★★",
-                image: "/images/testimonial-3.jpg",
+                image: "/images/testimonial-3.webp",
                 role: "Homeowner",
               },
               {
@@ -409,7 +409,7 @@ function Home() {
                   "The electrician was professional and reasonably priced.",
                 author: "Sarah W., Mombasa",
                 rating: "★★★★☆",
-                image: "/images/testimonial-2.jpg",
+                image: "/images/testimonial-2.webp",
                 role: "Business Owner",
               },
               {
@@ -417,7 +417,7 @@ function Home() {
                   "Best platform to find trusted service providers in Kenya.",
                 author: "David K., Kisumu",
                 rating: "★★★★★",
-                image: "/images/testimonial-1.jpg",
+                image: "/images/testimonial-1.webp",
                 role: "Service Provider",
               },
             ].map((testimonial, index) => (
