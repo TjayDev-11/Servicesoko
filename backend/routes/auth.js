@@ -31,12 +31,12 @@ if (!fs.existsSync(uploadDir)) {
 }
 
 const transporter = nodemailer.createTransport({
-  host: "smtp-relay.brevo.com",
+  host: "smtp.gmail.com",
   port: 587,
   secure: false,
   auth: {
-    user: process.env.BREVO_EMAIL,
-    pass: process.env.BREVO_SMTP_KEY,
+    user: process.env.EMAIL_USER,
+    pass: process.env.EMAIL_PASS,
   },
 });
 
@@ -52,6 +52,33 @@ const loginLimiter = rateLimit({
     });
   },
 });
+
+// Rate limiting for forgot-password
+const forgotPasswordLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 5, // Allow 5 requests per window
+  handler: (req, res) => {
+    console.log(`Rate limit hit for IP: ${req.ip} on /auth/forgot-password`);
+    res.status(429).json({
+      error: "Too many requests, please try again later",
+      code: "TOO_MANY_REQUESTS",
+    });
+  },
+});
+
+// Placeholder for SMS service (e.g., Twilio)
+const sendSMS = async ({ phone, message }) => {
+  // Replace with actual SMS provider (e.g., Twilio)
+  console.log(`[SMS Placeholder] Sending to ${phone}: ${message}`);
+  try {
+    // Example: const client = require('twilio')(process.env.TWILIO_SID, process.env.TWILIO_AUTH_TOKEN);
+    // await client.messages.create({ body: message, from: process.env.TWILIO_PHONE, to: phone });
+    return { success: true };
+  } catch (error) {
+    console.error("SMS sending error:", error.message, error.stack);
+    return { success: false, error: error.message };
+  }
+};
 
 router.post("/signup", async (req, res) => {
   const { email, phone, password, name } = req.body;
@@ -391,7 +418,7 @@ router.get("/validate-token", async (req, res) => {
         id: true,
         name: true,
         email: true,
-        phone:true,
+        phone: true,
         role: true,
         location: true,
         sellerProfile: {
@@ -399,15 +426,13 @@ router.get("/validate-token", async (req, res) => {
             location: true,
             serviceSellers: {
               include: {
-                service: true, // ✅ this is key
+                service: true,
               },
             },
           },
         },
       },
     });
-    
-    
 
     if (!user) {
       console.error("User not found in /auth/validate-token", {
@@ -450,7 +475,7 @@ router.get("/validate-token", async (req, res) => {
   }
 });
 
-router.post("/forgot-password", async (req, res) => {
+router.post("/forgot-password", forgotPasswordLimiter, async (req, res) => {
   const { identifier } = req.body;
 
   try {
@@ -458,49 +483,70 @@ router.post("/forgot-password", async (req, res) => {
       return res.status(400).json({ error: "Email or phone is required" });
     }
 
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const phoneRegex = /^\+?\d{10,15}$/;
+    const isEmail = emailRegex.test(identifier);
+    const isPhone = phoneRegex.test(identifier.replace(/[\s\-\(\)]/g, ""));
+    
+    if (!isEmail && !isPhone) {
+      return res.status(400).json({ error: "Invalid email or phone format" });
+    }
+
     const user = await prisma.user.findFirst({
       where: {
-        OR: [{ email: identifier }, { phone: identifier }],
+        OR: [{ email: isEmail ? identifier : undefined }, { phone: isPhone ? identifier : undefined }],
       },
     });
 
+    // Always return success to prevent enumeration
     if (!user) {
-      return res.status(404).json({ error: "User not found" });
-    }
-
-    if (!user.email) {
-      return res.status(400).json({
-        error: "Password reset requires email verification",
-      });
+      console.log(`No user found for identifier: ${identifier}`);
+      return res.json({ message: "If an account exists, a reset link has been sent" });
     }
 
     const resetToken = jwt.sign(
-      { id: user.id, email: user.email },
+      { id: user.id, email: user.email, phone: user.phone },
       JWT_SECRET,
       { expiresIn: "1h" }
     );
-
     const resetUrl = `${process.env.FRONTEND_URL}/reset-password?token=${resetToken}`;
 
-    const mailOptions = {
-      from: `"ServiceSoko" <${process.env.BREVO_EMAIL}>`,
-      to: user.email,
-      subject: "Password Reset Request",
-      html: `
-          <div style="font-family: Arial, sans-serif;">
-            <h2>Password Reset</h2>
-            <p>Click below to reset your password:</p>
+    if (isEmail && user.email) {
+      const mailOptions = {
+        from: `"ServiceSoko" <${process.env.EMAIL_USER}>`,
+        to: user.email,
+        subject: "Password Reset Request",
+        html: `
+          <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+            <h2 style="color: #1f2937;">Password Reset</h2>
+            <p style="color: #4b5563;">You requested a password reset for your ServiceSoko account.</p>
+            <p style="color: #4b5563;">Click the button below to set a new password:</p>
             <a href="${resetUrl}" 
-               style="background: #1976d2; color: white; padding: 10px 15px; text-decoration: none; border-radius: 4px;">
+               style="display: inline-block; background: #22d3ee; color: #1f2937; padding: 12px 24px; text-decoration: none; border-radius: 6px; font-weight: 600; margin: 16px 0;">
               Reset Password
             </a>
-            <p>Link expires in 1 hour.</p>
+            <p style="color: #4b5563;">This link will expire in 1 hour.</p>
+            <p style="color: #4b5563;">If you didn't request this, please ignore this email.</p>
+            <p style="color: #4b5563;">Best regards,<br>The ServiceSoko Team</p>
           </div>
         `,
-    };
+      };
 
-    await transporter.sendMail(mailOptions);
-    res.json({ message: "Password reset email sent" });
+      await transporter.sendMail(mailOptions);
+      console.log(`Password reset email sent to ${user.email}`);
+    }
+
+    if (isPhone && user.phone) {
+      const smsMessage = `ServiceSoko: Reset your password here: ${resetUrl} (Expires in 1 hour)`;
+      const smsResult = await sendSMS({ phone: user.phone, message: smsMessage });
+      if (!smsResult.success) {
+        console.error(`Failed to send SMS to ${user.phone}: ${smsResult.error}`);
+      } else {
+        console.log(`Password reset SMS sent to ${user.phone}`);
+      }
+    }
+
+    res.json({ message: "If an account exists, a reset link has been sent" });
   } catch (error) {
     console.error("Forgot password error:", {
       message: error.message,
@@ -527,6 +573,28 @@ router.post("/reset-password", async (req, res) => {
     if (password.length < 8) {
       return res.status(400).json({
         error: "Password must be at least 8 characters",
+        code: "INVALID_PASSWORD",
+      });
+    }
+
+    if (!/[A-Z]/.test(password)) {
+      return res.status(400).json({
+        error: "Password must contain at least one uppercase letter",
+        code: "INVALID_PASSWORD",
+      });
+    }
+
+    if (!/[a-z]/.test(password)) {
+      return res.status(400).json({
+        error: "Password must contain at least one lowercase letter",
+        code: "INVALID_PASSWORD",
+      });
+    }
+
+    if (!/[0-9]/.test(password)) {
+      return res.status(400).json({
+        error: "Password must contain at least one number",
+        code: "INVALID_PASSWORD",
       });
     }
 
@@ -536,7 +604,7 @@ router.post("/reset-password", async (req, res) => {
     });
 
     if (!user) {
-      return res.status(404).json({ error: "Invalid token" });
+      return res.status(400).json({ error: "Invalid token" });
     }
 
     const hashedPassword = await bcrypt.hash(password, SALT_ROUNDS);
@@ -563,6 +631,144 @@ router.post("/reset-password", async (req, res) => {
 
     res.status(500).json({
       error: "Password reset failed",
+      details:
+        process.env.NODE_ENV === "development" ? error.message : undefined,
+    });
+  }
+});
+
+router.post("/change-password", authenticateToken, async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+    const userId = req.user.id;
+
+    // Validate input
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({
+        error: "Current and new passwords are required",
+        code: "MISSING_FIELDS",
+      });
+    }
+
+    if (newPassword.length < 8) {
+      return res.status(400).json({
+        error: "New password must be at least 8 characters",
+        code: "INVALID_PASSWORD",
+      });
+    }
+
+    if (!/[A-Z]/.test(newPassword)) {
+      return res.status(400).json({
+        error: "New password must contain at least one uppercase letter",
+        code: "INVALID_PASSWORD",
+      });
+    }
+
+    if (!/[a-z]/.test(newPassword)) {
+      return res.status(400).json({
+        error: "New password must contain at least one lowercase letter",
+        code: "INVALID_PASSWORD",
+      });
+    }
+
+    if (!/[0-9]/.test(newPassword)) {
+      return res.status(400).json({
+        error: "New password must contain at least one number",
+        code: "INVALID_PASSWORD",
+      });
+    }
+
+    // Check if user exists
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      return res.status(404).json({
+        error: "User not found",
+        code: "USER_NOT_FOUND",
+      });
+    }
+
+    // Verify current password
+    if (!user.password) {
+      return res.status(400).json({
+        error: "This account uses social login",
+        code: "SOCIAL_LOGIN",
+      });
+    }
+
+    const passwordMatch = await bcrypt.compare(currentPassword, user.password);
+    if (!passwordMatch) {
+      return res.status(401).json({
+        error: "Incorrect current password",
+        code: "INVALID_CURRENT_PASSWORD",
+      });
+    }
+
+    // Hash and update new password
+    const hashedPassword = await bcrypt.hash(newPassword, SALT_ROUNDS);
+    await prisma.user.update({
+      where: { id: userId },
+      data: { password: hashedPassword },
+    });
+
+    res.json({ message: "Password changed successfully" });
+  } catch (error) {
+    console.error("Change password error:", {
+      message: error.message,
+      stack: error.stack,
+    });
+    res.status(500).json({
+      error: "Failed to change password",
+      code: "SERVER_ERROR",
+      details:
+        process.env.NODE_ENV === "development" ? error.message : undefined,
+    });
+  }
+});
+
+router.delete("/users", authenticateToken, async (req, res) => {
+  try {
+    const { reason, otherReason } = req.body;
+    const userId = req.user.id;
+
+    // Validate input
+    if (!reason) {
+      return res.status(400).json({
+        error: "Reason for deletion is required",
+        code: "MISSING_REASON",
+      });
+    }
+
+    // Check if user exists
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      return res.status(404).json({
+        error: "User not found",
+        code: "USER_NOT_FOUND",
+      });
+    }
+
+    // Log deletion reason
+    await prisma.deletedUserLog.create({
+      data: {
+        userId,
+        reason,
+        otherReason: otherReason || null,
+        deletedAt: new Date(),
+      },
+    });
+
+    // Delete the user
+    await prisma.user.delete({ where: { id: userId } });
+
+    res.json({ message: "Account deleted successfully" });
+  } catch (error) {
+    console.error("Delete account error:", {
+      message: error.message,
+      stack: error.stack,
+    });
+    res.status(500).json({
+      error: "Failed to delete account",
+      code: "SERVER_ERROR",
       details:
         process.env.NODE_ENV === "development" ? error.message : undefined,
     });

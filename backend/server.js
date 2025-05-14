@@ -8,6 +8,7 @@ import orderRoutes from "./routes/orderRoutes.js";
 import reviewRoutes from "./routes/reviewRoutes.js";
 import messageRoutes from "./routes/messageRoutes.js";
 import contactRoutes from "./routes/contactRoutes.js";
+import uploadRoutes from "./routes/uploads.js";
 import cors from "cors";
 import passport from "passport";
 import path from "path";
@@ -15,6 +16,7 @@ import { fileURLToPath } from "url";
 import helmet from "helmet";
 import rateLimit from "express-rate-limit";
 import morgan from "morgan";
+
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -80,6 +82,9 @@ app.use("/api", orderRoutes);
 app.use("/api", reviewRoutes);
 app.use("/api", messageRoutes);
 app.use("/api", contactRoutes);
+
+app.use("/api", uploadRoutes);
+
 
 // Health Checks
 const healthChecks = {

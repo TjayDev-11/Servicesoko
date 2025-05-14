@@ -51,7 +51,7 @@ model User {
 model SellerProfile {
   id             String          @id @default(cuid())
   userId         String          @unique
-  user           User            @relation(fields: [userId], references: [id])
+  user           User            @relation(fields: [userId], references: [id], onDelete: Cascade)
   name           String          @db.VarChar(100)
   phone          String?         @db.VarChar(20)
   location       String?         @db.VarChar(100)
@@ -92,7 +92,7 @@ model ServiceSeller {
   serviceId     String
   service       Service       @relation("ServiceToServiceSeller", fields: [serviceId], references: [id])
   sellerId      String
-  seller        User          @relation("UserToServiceSeller", fields: [sellerId], references: [id], map: "service_seller_user_fk")
+  seller        User          @relation("UserToServiceSeller", fields: [sellerId], references: [id], onDelete: Cascade, map: "service_seller_user_fk")
   sellerProfile SellerProfile @relation("SellerProfileToServiceSeller", fields: [sellerId], references: [userId], map: "service_seller_profile_fk")
   description   String?       @db.Text
   experience    Int?
@@ -118,9 +118,9 @@ model Order {
   serviceId   String
   service     Service     @relation(fields: [serviceId], references: [id])
   buyerId     String
-  buyer       User        @relation("UserToOrder", fields: [buyerId], references: [id])
+  buyer       User        @relation("UserToOrder", fields: [buyerId], references: [id], onDelete: Cascade)
   sellerId    String
-  seller      User        @relation("UserToSellerOrder", fields: [sellerId], references: [id])
+  seller      User        @relation("UserToSellerOrder", fields: [sellerId], references: [id], onDelete: Cascade)
   status      OrderStatus @default(PENDING)
   bookingDate DateTime?
   reviews     Review[]    @relation("OrderToReview")
@@ -136,7 +136,7 @@ model Order {
 model Review {
   id        String        @id @default(cuid())
   userId    String
-  user      User          @relation("UserToReview", fields: [userId], references: [id])
+  user      User          @relation("UserToReview", fields: [userId], references: [id], onDelete: Cascade)
   sellerId  String
   seller    SellerProfile @relation("SellerProfileToReview", fields: [sellerId], references: [userId])
   orderId   String
@@ -155,9 +155,9 @@ model Review {
 model Message {
   id         String   @id @default(cuid())
   senderId   String
-  sender     User     @relation("UserToSentMessages", fields: [senderId], references: [id])
+  sender     User     @relation("UserToSentMessages", fields: [senderId], references: [id], onDelete: Cascade)
   receiverId String
-  receiver   User     @relation("UserToReceivedMessages", fields: [receiverId], references: [id])
+  receiver   User     @relation("UserToReceivedMessages", fields: [receiverId], references: [id], onDelete: Cascade)
   content    String   @db.Text
   isRead     Boolean  @default(false)
   createdAt  DateTime @default(now())
@@ -167,4 +167,12 @@ model Message {
   @@index([receiverId])
   @@index([isRead])
   @@index([createdAt])
+}
+
+model DeletedUserLog {
+  id          Int      @id @default(autoincrement())
+  userId      String
+  reason      String
+  otherReason String?
+  deletedAt   DateTime @default(now())
 }

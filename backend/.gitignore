@@ -1,0 +1,42 @@
+# Node modules
+node_modules/
+
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+
+# OS generated files
+.DS_Store
+Thumbs.db
+
+# Optional npm cache directory
+.npm/
+
+# Prisma generated files (client can be regenerated)
+prisma/migrations/
+prisma/dev.db
+prisma/dev.sqlite
+prisma/dev.sqlite-journal
+
+# Multer file uploads
+Uploads/
+
+# VS Code settings
+.vscode/
+
+# Build output (if any)
+dist/
+build/
+
+# lock files (optional - keep only if you want consistent installs)
+yarn.lock
+package-lock.json
+
+# Coverage files (for testing)
+coverage/
