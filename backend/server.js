@@ -35,9 +35,14 @@ app.use(
     },
   })
 );
+const allowedOrigins = [
+  "https://servicesoko.co.ke",
+  "https://www.servicesoko.co.ke",
+  "http://localhost:5173" // for local testing
+];
 app.use(
   cors({
-    origin: true, // Reflect the request origin (safer than "*")
+    origin: allowedOrigins, // Reflect the request origin (safer than "*")
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
