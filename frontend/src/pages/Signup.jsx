@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import useStore from "../store";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate, Link, useLocation} from "react-router-dom";
 import { FaEye, FaEyeSlash } from "react-icons/fa";
 
 function Signup() {
@@ -17,6 +17,7 @@ function Signup() {
   const [error, setError] = useState("");
   const [success, setSuccess] = useState("");
   const [loading, setLoading] = useState(false);
+  const location = useLocation();
   const navigate = useNavigate();
   const sectionRef = useRef(null);
 
@@ -40,6 +41,13 @@ function Signup() {
   };
 
   const passwordStrength = getPasswordStrength(form.password);
+  useEffect(() => {
+    // Check for error from Google Auth redirect
+    if (location.state?.error) {
+      setError(location.state.error);
+      setTimeout(() => setError(""), 3000);
+    }
+  }, [location.state]);
 
   useEffect(() => {
     const observer = new IntersectionObserver(

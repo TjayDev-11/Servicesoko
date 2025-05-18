@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from "react";
 import useStore from "../store";
-import { useNavigate, Link } from "react-router-dom";
+import { useNavigate, Link, useLocation } from "react-router-dom";
 import { FaEye, FaEyeSlash } from "react-icons/fa";
 
 function Login() {
@@ -13,7 +13,16 @@ function Login() {
   const [success, setSuccess] = useState("");
   const [loading, setLoading] = useState(false);
   const navigate = useNavigate();
+  const location = useLocation();
   const sectionRef = useRef(null);
+
+  useEffect(() => {
+    // Check for error from Google Auth redirect
+    if (location.state?.error) {
+      setError(location.state.error);
+      setTimeout(() => setError(""), 3000);
+    }
+  }, [location.state]);
 
   useEffect(() => {
     const observer = new IntersectionObserver(

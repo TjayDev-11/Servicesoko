@@ -20,6 +20,7 @@ import Profile from "./pages/Profile";
 import Orders from "./pages/Orders";
 import ForgotPassword from "./pages/ForgotPassword";
 import ResetPassword from "./pages/ResetPassword";
+import GoogleAuthCallback from "./components/GoogleAuthCallback";
 import GoogleCallback from "./pages/GoogleCallback";
 import Settings from "./pages/Settings"; // New import
 import Navbar from "./components/Navbar";
@@ -181,6 +182,7 @@ function App() {
             <Route path="/services" element={<Services />} />
             <Route path="/about" element={<About />} />
             <Route path="/services/:category" element={<ServiceDetails />} />
+            <Route path="/auth/google/callback" element={<GoogleAuthCallback />} />
             <Route path="/contact" element={<Contact />} />
             <Route
               path="/add-service"
