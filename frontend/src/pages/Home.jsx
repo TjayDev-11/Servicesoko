@@ -320,51 +320,55 @@ function Home() {
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
             {[
               {
+                id: "plumbing",
                 name: "Plumbing Services",
                 description: "Fix leaks, install fixtures, and more",
                 price: "From KES 1,500",
                 image: "/images/plumbing.webp",
               },
               {
+                id: "electrical",
                 name: "Electrical Work",
                 description: "Wiring, installations, and repairs",
                 price: "From KES 2,000",
                 image: "/images/electrical.webp",
               },
               {
+                id: "cleaning",
                 name: "Cleaning Services",
                 description: "Home and office cleaning",
                 price: "From KES 1,000",
                 image: "/images/cleaning.webp",
               },
               {
+                id: "moving",
                 name: "Movers & Packers",
                 description: "Reliable moving services",
                 price: "From KES 5,000",
                 image: "/images/movers.webp",
               },
-            ].map((service, index) => (
+            ].map((category) => (
               <div
-                key={index}
+                key={category.id}
                 className="bg-white rounded-xl overflow-hidden shadow-md hover:shadow-lg transition-all duration-300 hover:-translate-y-2"
               >
                 <div className="h-48 bg-gray-100 overflow-hidden">
                   <img
-                    src={service.image}
-                    alt={service.name}
+                    src={category.image}
+                    alt={category.name}
                     className="w-full h-full object-cover transition-transform duration-500 hover:scale-105"
                     loading="lazy"
                   />
                 </div>
                 <div className="p-6">
-                  <h3 className="text-xl font-bold mb-2">{service.name}</h3>
+                  <h3 className="text-xl font-bold mb-2">{category.name}</h3>
                   <p className="text-gray-600 mb-4 min-h-[3.5rem]">
-                    {service.description}
+                    {category.description}
                   </p>
                   <div className="flex justify-between items-center">
-                    <span className="font-bold">{service.price}</span>
+                    <span className="font-bold">{category.price}</span>
                     <Link
-                      to={`/services/${service.id}`}
+                      to={`/services/${category.id}`}
                       className="px-4 py-2 bg-cyan-400 text-black font-bold text-sm rounded-full transition-all hover:bg-cyan-500"
                     >
                       Book Now

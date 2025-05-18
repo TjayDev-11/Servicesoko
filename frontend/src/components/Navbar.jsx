@@ -424,17 +424,7 @@ function Navbar() {
                 </Link>
               </li>
             )}
-            {isAuthenticated && (
-              <li>
-                <button
-                  onClick={handleLogout}
-                  className="block mt-2 px-3 py-1.5 w-full text-left text-gray-900 text-sm font-medium hover:bg-gray-100 hover:text-cyan-400 rounded-md transition-colors"
-                  aria-label="Log out"
-                >
-                  Logout
-                </button>
-              </li>
-            )}
+            
           </ul>
         )}
       </nav>
