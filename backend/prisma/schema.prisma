@@ -28,7 +28,8 @@ model User {
   id               String          @id @default(cuid())
   name             String          @db.VarChar(100)
   email            String?         @unique @db.VarChar(255)
-  password         String          @db.VarChar(255)
+  password         String?          @db.VarChar(255)
+  googleId         String?         @unique
   phone            String?         @unique @db.VarChar(20)
   location         String?
   bio              String?

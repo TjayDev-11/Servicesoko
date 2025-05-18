@@ -10,6 +10,8 @@ import fs from "fs";
 import authenticateToken from "../middleware/authMiddleware.js";
 import multer from "multer";
 import rateLimit from "express-rate-limit";
+import passport from "passport";
+import GoogleStrategy from "passport-google-oauth20";
 import {
   notifyUserRegistration,
   notifyUserRegistrationSMS,
@@ -68,11 +70,8 @@ const forgotPasswordLimiter = rateLimit({
 
 // Placeholder for SMS service (e.g., Twilio)
 const sendSMS = async ({ phone, message }) => {
-  // Replace with actual SMS provider (e.g., Twilio)
   console.log(`[SMS Placeholder] Sending to ${phone}: ${message}`);
   try {
-    // Example: const client = require('twilio')(process.env.TWILIO_SID, process.env.TWILIO_AUTH_TOKEN);
-    // await client.messages.create({ body: message, from: process.env.TWILIO_PHONE, to: phone });
     return { success: true };
   } catch (error) {
     console.error("SMS sending error:", error.message, error.stack);
@@ -80,6 +79,137 @@ const sendSMS = async ({ phone, message }) => {
   }
 };
 
+// Initialize Passport for Google OAuth
+passport.use(
+  new GoogleStrategy(
+    {
+      clientID: process.env.GOOGLE_CLIENT_ID,
+      clientSecret: process.env.GOOGLE_CLIENT_SECRET,
+      callbackURL: process.env.GOOGLE_REDIRECT_URI,
+    },
+    async (accessToken, refreshToken, profile, done) => {
+      try {
+        // Check if user exists by Google ID or email
+        let user = await prisma.user.findFirst({
+          where: {
+            OR: [
+              { googleId: profile.id },
+              { email: profile.emails[0].value },
+            ],
+          },
+        });
+
+        if (user) {
+          // Update Google ID if not set
+          if (!user.googleId) {
+            user = await prisma.user.update({
+              where: { id: user.id },
+              data: { googleId: profile.id },
+            });
+          }
+        } else {
+          // Create new user
+          user = await prisma.user.create({
+            data: {
+              googleId: profile.id,
+              email: profile.emails[0].value,
+              name: profile.displayName,
+              role: "BUYER",
+            },
+          });
+
+          // Send registration notifications
+          if (user.email) {
+            try {
+              const notificationResult = await notifyUserRegistration({
+                userEmail: user.email,
+                userName: user.name,
+              });
+              console.log(
+                `Registration email notification for user ${user.id}:`,
+                notificationResult
+              );
+            } catch (notificationError) {
+              console.error(
+                `Error sending registration email to ${user.email}:`,
+                notificationError.message
+              );
+            }
+          }
+        }
+
+        return done(null, user);
+      } catch (error) {
+        console.error("Google OAuth error:", error.message);
+        return done(error, null);
+      }
+    }
+  )
+);
+
+// Serialize user to session (minimal session handling, as we're using JWT)
+passport.serializeUser((user, done) => {
+  done(null, user.id);
+});
+
+// Deserialize user from session
+passport.deserializeUser(async (id, done) => {
+  try {
+    const user = await prisma.user.findUnique({ where: { id } });
+    done(null, user);
+  } catch (error) {
+    done(error, null);
+  }
+});
+
+// Initialize Passport middleware
+router.use(passport.initialize());
+
+// Google Auth route
+router.get(
+  "/google",
+  passport.authenticate("google", { scope: ["profile", "email"] })
+);
+
+// Google Auth callback
+router.get(
+  "/google/callback",
+  passport.authenticate("google", { session: false, failureRedirect: `${process.env.FRONTEND_URL}/login?error=GoogleAuthFailed` }),
+  async (req, res) => {
+    try {
+      const user = req.user;
+
+      // Generate JWT tokens
+      const accessToken = jwt.sign(
+        {
+          id: user.id,
+          email: user.email,
+          phone: user.phone,
+          role: user.role,
+          name: user.name,
+          isSeller: user.isSeller || false,
+        },
+        JWT_SECRET,
+        { expiresIn: "15m" }
+      );
+
+      const refreshToken = jwt.sign(
+        { id: user.id, role: user.role },
+        JWT_SECRET,
+        { expiresIn: "7d" }
+      );
+
+      // Redirect to frontend with tokens and user data
+      const redirectUrl = `${process.env.FRONTEND_URL}/auth/google/callback?accessToken=${accessToken}&refreshToken=${refreshToken}&userId=${user.id}&name=${encodeURIComponent(user.name)}&email=${encodeURIComponent(user.email || "")}&role=${user.role}`;
+      res.redirect(redirectUrl);
+    } catch (error) {
+      console.error("Google callback error:", error.message);
+      res.redirect(`${process.env.FRONTEND_URL}/login?error=GoogleAuthFailed`);
+    }
+  }
+);
+
+// Signup route
 router.post("/signup", async (req, res) => {
   const { email, phone, password, name } = req.body;
 
@@ -229,6 +359,7 @@ router.post("/signup", async (req, res) => {
   }
 });
 
+// Login route
 router.post("/login", loginLimiter, async (req, res) => {
   const { identifier, password, rememberMe } = req.body;
   console.log("Login attempt for identifier:", identifier);
@@ -251,7 +382,7 @@ router.post("/login", loginLimiter, async (req, res) => {
       return res.status(400).json({ error: "User not found!" });
     }
 
-    if (!user.password) {
+    if (!user.password && !user.googleId) {
       console.log("Account uses social login for user:", user.id);
       return res.status(400).json({ error: "This account uses social login" });
     }
@@ -271,7 +402,7 @@ router.post("/login", loginLimiter, async (req, res) => {
         name: user.name,
         isSeller: user.isSeller || false,
       },
-      JWT_SECRET,
+  JWT_SECRET,
       { expiresIn: rememberMe ? "7d" : "15m" }
     );
 
@@ -307,6 +438,7 @@ router.post("/login", loginLimiter, async (req, res) => {
   }
 });
 
+// Refresh token route
 router.post("/refresh", async (req, res) => {
   const { refreshToken } = req.body;
 
@@ -386,6 +518,7 @@ router.post("/refresh", async (req, res) => {
   }
 });
 
+// Validate token route
 router.get("/validate-token", async (req, res) => {
   const authHeader = req.headers["authorization"];
   const token = authHeader && authHeader.split(" ")[1];
@@ -475,6 +608,7 @@ router.get("/validate-token", async (req, res) => {
   }
 });
 
+// Forgot password route
 router.post("/forgot-password", forgotPasswordLimiter, async (req, res) => {
   const { identifier } = req.body;
 
@@ -487,21 +621,26 @@ router.post("/forgot-password", forgotPasswordLimiter, async (req, res) => {
     const phoneRegex = /^\+?\d{10,15}$/;
     const isEmail = emailRegex.test(identifier);
     const isPhone = phoneRegex.test(identifier.replace(/[\s\-\(\)]/g, ""));
-    
+
     if (!isEmail && !isPhone) {
       return res.status(400).json({ error: "Invalid email or phone format" });
     }
 
     const user = await prisma.user.findFirst({
       where: {
-        OR: [{ email: isEmail ? identifier : undefined }, { phone: isPhone ? identifier : undefined }],
+        OR: [
+          { email: isEmail ? identifier : undefined },
+          { phone: isPhone ? identifier : undefined },
+        ],
       },
     });
 
     // Always return success to prevent enumeration
     if (!user) {
       console.log(`No user found for identifier: ${identifier}`);
-      return res.json({ message: "If an account exists, a reset link has been sent" });
+      return res.json({
+        message: "If an account exists, a reset link has been sent",
+      });
     }
 
     const resetToken = jwt.sign(
@@ -538,7 +677,10 @@ router.post("/forgot-password", forgotPasswordLimiter, async (req, res) => {
 
     if (isPhone && user.phone) {
       const smsMessage = `ServiceSoko: Reset your password here: ${resetUrl} (Expires in 1 hour)`;
-      const smsResult = await sendSMS({ phone: user.phone, message: smsMessage });
+      const smsResult = await sendSMS({
+        phone: user.phone,
+        message: smsMessage,
+      });
       if (!smsResult.success) {
         console.error(`Failed to send SMS to ${user.phone}: ${smsResult.error}`);
       } else {
@@ -560,6 +702,7 @@ router.post("/forgot-password", forgotPasswordLimiter, async (req, res) => {
   }
 });
 
+// Reset password route
 router.post("/reset-password", async (req, res) => {
   const { token, password } = req.body;
 
@@ -637,6 +780,7 @@ router.post("/reset-password", async (req, res) => {
   }
 });
 
+// Change password route
 router.post("/change-password", authenticateToken, async (req, res) => {
   try {
     const { currentPassword, newPassword } = req.body;
@@ -659,7 +803,7 @@ router.post("/change-password", authenticateToken, async (req, res) => {
 
     if (!/[A-Z]/.test(newPassword)) {
       return res.status(400).json({
-        error: "New password must contain at least one uppercase letter",
+        error: " PPPassword must contain at least one uppercase letter",
         code: "INVALID_PASSWORD",
       });
     }
@@ -725,6 +869,7 @@ router.post("/change-password", authenticateToken, async (req, res) => {
   }
 });
 
+// Delete user route
 router.delete("/users", authenticateToken, async (req, res) => {
   try {
     const { reason, otherReason } = req.body;
